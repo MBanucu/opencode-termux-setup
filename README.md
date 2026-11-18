@@ -47,6 +47,8 @@ Upstream only publishes **glibc** and **musl** Linux binaries. Termux runs on An
 
 Forcing it through `--force`, or wrapping the glibc binary, works only partially and breaks on the next `opencode upgrade`.
 
+Also note that `opencode` is **not in the official Termux repositories yet** — `termux-main`, `termux-glibc` and `tur-repo` carry no such package, so on a stock Termux `pkg install opencode` fails with `E: Unable to locate package opencode`. Upstream packaging is in review: [termux/termux-packages#32643 `addpkg(main/opencode)`](https://github.com/termux/termux-packages/pull/32643) (open since 2026-10-15, awaiting review; tracking issue [#25387](https://github.com/termux/termux-packages/issues/25387)). If that PR is merged and built, the third-party source below is no longer needed.
+
 ## What actually works: a native Bionic package
 
 [bd-loser/opencode-bionic](https://github.com/bd-loser/opencode-bionic) builds OpenCode for Android/aarch64 against Bionic and publishes it in a **signed apt repository**, with `stable`, `v1` (legacy 1.x line) and `dev` channels. That is what `install.sh` uses.
