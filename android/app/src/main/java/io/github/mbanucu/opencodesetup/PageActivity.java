@@ -144,11 +144,14 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             text.append("line ").append(line).append(" of ").append(lines).append('\n');
         }
         write(text.toString());
-        reveal();
-        // reveal() scrolls to the terminal; a tall one would push the page's
-        // actions out of view, and the terminal is measured from the DOM, which
-        // does not need it on screen.
-        page.post(() -> page.scrollTo(0, 0));
+        // Shown, but not revealed: reveal() scrolls the page to the terminal, and
+        // a tall one then pushes the page's actions out of the view hierarchy.
+        // The measurement reads the DOM, which needs layout, not a visible
+        // terminal on screen.
+        if (terminalFrame != null) {
+            terminalFrame.setVisibility(View.VISIBLE);
+            terminalFrame.post(() -> script("fitNow()"));
+        }
     }
 
     @Override
