@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -17,12 +18,15 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -36,7 +40,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 
 /**
  * A page of this app: a column of text, a terminal for Termux output and a
@@ -68,11 +74,16 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private Button noticeAction;
     private ScrollView page;
     private WebView output;
-    private volatile boolean outputLoaded;
+    private View terminalFrame;
+    private ProgressBar busy;
+    private boolean outputLoaded;
     private final Deque<String> waitingScripts = new ArrayDeque<>();
-    private Runnable pending;
+    private final List<Button> actionButtons = new ArrayList<>();
+    private final List<View> collapseOnRun = new ArrayList<>();
     private volatile Live live;
+    private volatile String screen = "";
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private Runnable pending;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,6 +100,17 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         scroll.addView(column, new ScrollView.LayoutParams(
                 ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
         setContentView(scroll);
+
+        if (!(this instanceof MainActivity)) {
+            // The sub-pages sit on top of the main screen; a visible way back
+            // beats relying on the gesture alone.
+            TextView back = new TextView(this);
+            back.setText(getString(R.string.back) + "  ‹");
+            back.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            back.setPadding(0, 0, 0, dp(10));
+            back.setOnClickListener(v -> finish());
+            column.addView(back);
+        }
     }
 
     @Override
@@ -128,7 +150,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     protected TextView body(int label) {
         TextView view = new TextView(this);
         view.setText(label);
-        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         view.setPadding(0, dp(6), 0, dp(16));
         column.addView(view);
         return view;
@@ -150,6 +172,23 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         button.setAllCaps(false);
         button.setOnClickListener(onClick);
         column.addView(button, buttonParams());
+        actionButtons.add(button);
+        return button;
+    }
+
+    /** The one action a page is for: filled, so the page has a clear next step. */
+    protected Button primaryButton(int label, View.OnClickListener onClick) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextColor(0xFFFFFFFF);
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(0xFF232A34);
+        shape.setCornerRadius(dp(10));
+        button.setBackground(shape);
+        button.setOnClickListener(onClick);
+        column.addView(button, buttonParams());
+        actionButtons.add(button);
         return button;
     }
 
@@ -160,11 +199,37 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         return params;
     }
 
+    /** A command shown the way the terminal prints it: dark, monospace, rounded. */
+    protected TextView mono(CharSequence text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTypeface(Typeface.MONOSPACE);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        view.setTextColor(0xFFDCDCDC);
+        view.setTextIsSelectable(true);
+        view.setPadding(dp(12), dp(12), dp(12), dp(12));
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(0xFF161B22);
+        shape.setCornerRadius(dp(10));
+        shape.setStroke(dp(1), 0xFF2A303A);
+        view.setBackground(shape);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.topMargin = dp(16);
+        params.bottomMargin = dp(4);
+        column.addView(view, params);
+        return view;
+    }
+
+    /** Hides a page's preamble once its command is on its way. */
+    protected void collapseOnRun(View view) {
+        collapseOnRun.add(view);
+    }
+
     /**
      * The terminal this page prints Termux output into: the xterm.js emulator
-     * loaded from the app's own assets, dark, and a fixed height so a long
-     * install scrolls inside it instead of pushing the page around. The page
-     * never navigates anywhere and the contents are never fetched from a
+     * loaded from the app's own assets, framed like a window in the page. The
+     * page never navigates anywhere and the contents are never fetched from a
      * network, so the WebView is only a canvas for that asset.
      */
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
@@ -211,11 +276,43 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 return false;
             });
 
-            web.setVisibility(View.GONE);
+            // Rounded and outlined, so the terminal reads as a window in the page
+            // instead of a black rectangle pasted onto it.
+            FrameLayout frame = new FrameLayout(this);
+            GradientDrawable shape = new GradientDrawable();
+            shape.setColor(0xFF101418);
+            shape.setCornerRadius(dp(10));
+            shape.setStroke(dp(1), 0xFF2A303A);
+            frame.setBackground(shape);
+            frame.setClipToOutline(true);
+            frame.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
+            frame.addView(web, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            frame.setVisibility(View.GONE);
+            terminalFrame = frame;
+
+            // Tall enough to be useful: a third of the page was not.
+            int height = Math.max(dp(300), Math.round(getResources().getDisplayMetrics().heightPixels * 0.45f));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(280));
+                    LinearLayout.LayoutParams.MATCH_PARENT, height);
             params.topMargin = dp(12);
-            column.addView(web, params);
+            params.bottomMargin = dp(8);
+            column.addView(frame, params);
+
+            busy = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+            busy.setIndeterminate(true);
+            busy.setVisibility(View.GONE);
+            LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(4));
+            progressParams.bottomMargin = dp(8);
+            column.addView(busy, progressParams);
+
+            Button copy = new Button(this);
+            copy.setText(R.string.copy_output);
+            copy.setAllCaps(false);
+            copy.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            copy.setOnClickListener(v -> copy(screen));
+            column.addView(copy, buttonParams());
 
             output = web;
             web.loadUrl("file:///android_asset/terminal.html");
@@ -310,6 +407,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             }
         } catch (RuntimeException refused) {
             stopListening();
+            running(false);
             Log.w(TAG, "Termux refused the command", refused);
             copy(TermuxCommands.ALLOW_EXTERNAL_APPS);
             notice(getString(R.string.permission_title) + "\n\n"
@@ -323,10 +421,26 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     public void onCommandResult(String text) {
         Log.i(TAG, "result: " + text.replace("\n", " | "));
         stopListening();
-        WebView box = outputBox();
+        running(false);
         script("resetTerm()");
         write(text);
-        reveal(box);
+        reveal();
+    }
+
+    /**
+     * Locks the page's actions while a command runs: a second tap used to be
+     * able to start a second apt transaction on top of the first.
+     */
+    protected void running(boolean active) {
+        for (Button button : actionButtons) {
+            button.setEnabled(!active);
+        }
+        if (busy != null) {
+            busy.setVisibility(active ? View.VISIBLE : View.GONE);
+        }
+        for (View view : collapseOnRun) {
+            view.setVisibility(active ? View.GONE : View.VISIBLE);
+        }
     }
 
     // --- helpers -------------------------------------------------------------
@@ -389,6 +503,10 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             char[] buffer = new char[4096];
             int read;
             while (live == opened && (read = reader.read(buffer)) >= 0) {
+                // Only live chunks are logged this way: the final result is a
+                // different path, so a "stream:" line always means output
+                // arrived while the command was still running.
+                Log.i(TAG, "stream:" + read);
                 write(new String(buffer, 0, read));
             }
         } catch (IOException done) {
@@ -424,20 +542,29 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         box.post(() -> box.evaluateJavascript(javascript, null));
     }
 
-    private void reveal(WebView box) {
-        box.setVisibility(View.VISIBLE);
-        box.post(() -> {
+    private void reveal() {
+        WebView box = output;
+        View frame = terminalFrame;
+        if (box == null || frame == null) {
+            return;
+        }
+        frame.setVisibility(View.VISIBLE);
+        frame.post(() -> {
             script("fitNow()");
             // A long page can put the terminal below the fold; bring it into
             // view so the output is seen as it arrives.
-            page.smoothScrollTo(0, box.getTop());
+            page.smoothScrollTo(0, frame.getTop());
         });
     }
 
     private void startOutput() {
-        WebView box = outputBox();
+        outputBox();
+        running(true);
+        screen = "";
         script("resetTerm()");
         String waiting = getString(R.string.output_waiting);
+        script("waitingB64('" + Base64.encodeToString(
+                waiting.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP) + "')");
         File dir = getExternalFilesDir(null);
         if (dir != null) {
             try (FileOutputStream out = new FileOutputStream(new File(dir, "live-output.txt"))) {
@@ -446,9 +573,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 Log.w(TAG, "could not reset the live output file", unwritable);
             }
         }
-        script("waitingB64('" + Base64.encodeToString(
-                waiting.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP) + "')");
-        reveal(box);
+        reveal();
     }
 
     private void stopListening() {
@@ -466,13 +591,12 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
 
     /**
      * Publishes the text the terminal is showing: to the accessibility tree for
-     * a screen reader, and to {@code live-output.txt} for adb. The file is also
-     * what the end-to-end test reads, because a terminal that repaints while a
-     * command runs does not always give UI Automator a node to read.
+     * a screen reader, and to {@code live-output.txt} for adb.
      */
     private final class Screen {
         @JavascriptInterface
         public void onScreen(String text) {
+            screen = text;
             File dir = getExternalFilesDir(null);
             if (dir != null) {
                 File file = new File(dir, "live-output.txt");

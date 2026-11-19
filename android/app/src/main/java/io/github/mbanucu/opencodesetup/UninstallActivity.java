@@ -1,6 +1,5 @@
 package io.github.mbanucu.opencodesetup;
 
-import android.graphics.Typeface;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.widget.LinearLayout;
@@ -35,19 +34,10 @@ public final class UninstallActivity extends PageActivity {
         group.setOnCheckedChangeListener((ignored, id) -> showCommand());
         column.addView(group);
 
-        preview = new TextView(this);
-        preview.setTypeface(Typeface.MONOSPACE);
-        preview.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        preview.setTextIsSelectable(true);
-        preview.setPadding(dp(12), dp(12), dp(12), dp(12));
-        preview.setBackgroundColor(0xFFF0F0F0);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.topMargin = dp(16);
-        column.addView(preview, params);
-
+        // Shown the way the terminal will print it, not as grey body text.
+        preview = mono(getString(R.string.uninstall_preview));
         outputBox();
-        button(R.string.uninstall_confirm, v -> remove());
+        primaryButton(R.string.uninstall_confirm, v -> remove());
         button(R.string.consent_cancel, v -> finish());
         showCommand();
     }

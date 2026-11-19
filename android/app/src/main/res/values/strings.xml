@@ -16,6 +16,8 @@
 You may need Termux\'s \"allow external apps\" setting for this app to send commands: add allow-external-apps=true to ~/.termux/termux.properties.</string>
 
     <string name="output_waiting">Running in Termux…</string>
+    <string name="back">Back</string>
+    <string name="copy_output">Copy output</string>
 
     <string name="consent_title">Download about 70 MB?</string>
     <string name="consent_message">Termux will add a signed APT repository and install:

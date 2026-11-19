@@ -15,9 +15,11 @@ public final class InstallActivity extends PageActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         heading(R.string.consent_title);
-        body(R.string.consent_message);
+        // Once setup starts, the preamble has done its job: collapsing it gives
+        // the terminal the screen it needs.
+        collapseOnRun(body(R.string.consent_message));
         outputBox();
-        button(R.string.consent_accept, v -> runCommand(Commands.INSTALL, "Install opencode",
+        primaryButton(R.string.consent_accept, v -> runCommand(Commands.INSTALL, "Install opencode",
                 "Add the opencode apt repository and install opencode"));
         button(R.string.consent_cancel, v -> finish());
     }

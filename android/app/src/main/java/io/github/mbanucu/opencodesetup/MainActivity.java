@@ -25,7 +25,10 @@ public final class MainActivity extends PageActivity {
         body(R.string.tagline);
         status = bold(R.string.status_termux_installed);
 
-        button(R.string.action_install, v -> startActivity(new Intent(this, InstallActivity.class)));
+        // The one thing the app is for gets the filled button; the rest are
+        // equal-weight actions next to it.
+        primaryButton(R.string.action_install,
+                v -> startActivity(new Intent(this, InstallActivity.class)));
         button(R.string.action_uninstall,
                 v -> startActivity(new Intent(this, UninstallActivity.class)));
         button(R.string.action_check, v -> runCheck());
@@ -42,9 +45,11 @@ public final class MainActivity extends PageActivity {
     }
 
     private void refresh() {
-        status.setText(isTermuxInstalled()
+        boolean installed = isTermuxInstalled();
+        status.setText(installed
                 ? R.string.status_termux_installed
                 : R.string.status_termux_missing);
+        status.setTextColor(installed ? 0xFF2E7D32 : 0xFFB3261E);
     }
 
     private void runCheck() {
