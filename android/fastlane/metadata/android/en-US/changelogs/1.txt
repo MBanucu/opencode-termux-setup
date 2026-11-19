@@ -1,0 +1,2 @@
+First release: detect Termux, name the repository that will be added, show the
+download budget, install opencode on consent, and report the installed version.

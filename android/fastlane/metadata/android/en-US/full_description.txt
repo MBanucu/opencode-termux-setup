@@ -1,0 +1,27 @@
+opencode is a coding agent for the terminal. Upstream publishes only glibc and musl builds, so on Android the official installer and the npm package both fail: Termux runs on Bionic, and there is no glibc loader on the device.
+
+This app is the setup companion for the native Android build of opencode. It does not contain opencode and it does not install anything by itself:
+
+- it checks whether Termux is installed,
+- it names the repository it will add, and shows exactly how much will be downloaded,
+- with your consent, it sends one command to Termux that adds the signed APT repository and installs the package,
+- afterwards it reports the installed version,
+- and it explains how to fix the one Termux setting that blocks commands from other apps.
+
+The package comes from bd-loser/opencode-bionic, a third-party project that cross-compiles opencode for Android and publishes it on GitHub Pages. It is not an official opencode release, and the app says so before you agree to it.
+
+Requirements:
+
+- Termux, installed from F-Droid or GitHub, not from Google Play,
+- Android 7.0 or newer,
+- about 210 MB of free space,
+- an internet connection for the first install.
+
+What gets downloaded, and from where:
+
+- the opencode package (~70 MB download, ~209 MB installed), from the signed APT repository of bd-loser/opencode-bionic,
+- nothing else: no proot, no glibc runtime, no npm.
+
+The app requests no INTERNET permission, has no analytics, no accounts and no background work. It only talks to Termux, and only when you press a button.
+
+The installer, the documentation and the issue notes are at https://github.com/MBanucu/opencode-termux-setup (MIT). opencode itself is MIT and is not redistributed here.

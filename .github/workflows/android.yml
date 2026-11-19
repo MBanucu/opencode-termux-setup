@@ -1,14 +1,19 @@
 name: android
 
-# Builds the setup app.  The scaffold was written without an Android SDK, so
-# this workflow is the compiler: it is what turns "probably builds" into an APK
-# that can be installed on a device.
+# Builds the setup app, checks the F-Droid metadata, and proves the release build
+# is reproducible.  The scaffold was written without an Android SDK, so this
+# workflow is the compiler: it is what turns "probably builds" into an APK that
+# can be installed on a device.
 
 on:
   workflow_dispatch:
   push:
     paths:
       - 'android/**'
+      - 'fdroiddata/**'
+      - 'docs/reproducible-builds.md'
+      - 'test/**'
+      - 'LICENSE'
       - '.github/workflows/android.yml'
 
 permissions:
@@ -33,6 +38,11 @@ jobs:
           yes | "$manager" --licenses >/dev/null 2>&1 || true
           "$manager" "platforms;android-35" "build-tools;35.0.0" "platform-tools" >/dev/null
           echo "sdk=$sdk" >>"$GITHUB_ENV"
+
+      - name: F-Droid metadata test
+        run: |
+          pip install --quiet pyyaml
+          bash test/fdroid-metadata-test.sh
 
       - name: Wrapper
         working-directory: android
@@ -63,3 +73,46 @@ jobs:
         continue-on-error: true
         working-directory: android
         run: ./gradlew --no-daemon lintDebug
+
+  reproducible:
+    name: reproducible release build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        run: |
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          manager=$(command -v sdkmanager || echo "$sdk/cmdline-tools/latest/bin/sdkmanager")
+          yes | "$manager" --licenses >/dev/null 2>&1 || true
+          "$manager" "platforms;android-35" "build-tools;35.0.0" "platform-tools" >/dev/null
+          echo "sdk=$sdk" >>"$GITHUB_ENV"
+
+      # Two clean builds of the same commit must produce identical bytes.  The
+      # unsigned release APK is compared because the debug APK carries a
+      # per-machine debug signature.
+      - name: Build twice and compare
+        working-directory: android
+        run: |
+          set -euo pipefail
+          build() {
+            ./gradlew --no-daemon --no-build-cache --rerun-tasks clean assembleRelease \
+              2>&1 | tail -5
+            apk=$(ls app/build/outputs/apk/release/*.apk | head -1)
+            cp "$apk" "$1"
+            sha256sum "$1"
+          }
+          build "$RUNNER_TEMP/first.apk"
+          build "$RUNNER_TEMP/second.apk"
+          if cmp "$RUNNER_TEMP/first.apk" "$RUNNER_TEMP/second.apk"; then
+            echo "reproducible: both builds are byte-identical"
+          else
+            echo "::error::release build is not reproducible"
+            exit 1
+          fi
+          ls -l "$RUNNER_TEMP/first.apk"

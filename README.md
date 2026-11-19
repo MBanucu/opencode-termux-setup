@@ -32,6 +32,8 @@ bash install.sh
 
 It needs Termux's `allow-external-apps=true` in `~/.termux/termux.properties`; if Termux refuses the command, the app copies that line to the clipboard.
 
+F-Droid packaging lives in [`fdroiddata/`](fdroiddata/): the metadata recipe, the submission notes, and the reproducibility settings the release build uses.
+
 Then:
 
 ```bash

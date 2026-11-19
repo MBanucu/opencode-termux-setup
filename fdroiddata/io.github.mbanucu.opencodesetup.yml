@@ -1,0 +1,69 @@
+Categories:
+  - Development
+License: MIT
+AuthorName: Michael Banucu
+SourceCode: https://github.com/MBanucu/opencode-termux-setup
+IssueTracker: https://github.com/MBanucu/opencode-termux-setup/issues
+Changelog: https://github.com/MBanucu/opencode-termux-setup/releases
+
+AutoName: opencode-setup
+Description: |-
+  opencode is a coding agent for the terminal. Upstream publishes only glibc and
+  musl builds, so on Android the official installer and the npm package both
+  fail: Termux runs on Bionic, and there is no glibc loader on the device.
+
+  This app is the setup companion for the native Android build of opencode. It
+  contains no opencode and installs nothing by itself. It checks that Termux is
+  installed, shows exactly which repository will be added and how much will be
+  downloaded, and then, with your consent, hands one command to Termux that adds
+  the signed APT repository and installs the package. It can later report the
+  installed version, and it explains how to fix the one Termux setting that
+  blocks commands from other apps.
+
+  The package comes from bd-loser/opencode-bionic, a third-party project that
+  cross-compiles opencode for Android and publishes it on GitHub Pages. It is not
+  an official opencode release, and this app says so before you agree to it.
+
+  Requirements: Termux from F-Droid or GitHub (not Google Play), Android 7.0 or
+  newer, about 210 MB of free space, and a connection for the first install.
+
+  The app requests no INTERNET permission, has no analytics, no accounts and no
+  background work. It talks to Termux, and only when you press a button.
+
+  The installer, documentation and issue notes are at
+  https://github.com/MBanucu/opencode-termux-setup (MIT). opencode itself is MIT
+  and is not redistributed here.
+
+RepoType: git
+Repo: https://github.com/MBanucu/opencode-termux-setup.git
+
+Builds:
+  - versionName: 0.1.0
+    versionCode: 1
+    commit: android-v0.1.0
+    subdir: android
+    gradle:
+      - yes
+    output: app/build/outputs/apk/release/*.apk
+
+MaintainerNotes: |-
+  Version checks are manual (`UpdateCheckMode: None`) on purpose: this repository
+  also tags the installer and releases APKs, so an automatic tag check would read
+  unrelated tags as new app versions. Bump `Builds`, `CurrentVersion` and
+  `CurrentVersionCode` together with a new `android-v*` tag.
+
+  The app declares no INTERNET permission; the download the consent dialog
+  describes is performed by Termux, not by this app. If a reviewer reads the
+  permission list, that is why.
+
+  Reproducibility: the release build disables AGP's dependency metadata blob and
+  BuildConfig generation, which are the two inputs that vary without a source
+  change. `docs/reproducible-builds.md` records how it is checked, and the
+  `reproducible` CI job builds `assembleRelease` twice and compares the bytes.
+  `versionCode`/`versionName` live only in `android/app/build.gradle.kts` and must
+  match the `Builds` entry.
+
+AutoUpdateMode: None
+UpdateCheckMode: None
+CurrentVersion: 0.1.0
+CurrentVersionCode: 1
