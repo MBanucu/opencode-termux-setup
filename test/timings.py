@@ -5,15 +5,21 @@ The instrumentation logs one line per finished test, on the app's tag:
 
     timing: <class>#<test> <millis>ms <passed|failed>
 
-This script keeps those lines in a SQLite file, which answers the two questions
-the harness has: how these tests have behaved over time (`history`), and how much
-longer the run that is happening now needs (`eta`). The estimate is the median of
-each remaining test's past durations, plus what the run has already spent, so a
-slow mirror makes the estimate larger instead of making a test fail.
+and, from the tests that time their own parts:
+
+    step:<name> <millis>ms
+
+This script keeps both in a SQLite file, which answers the questions the harness
+has: how these tests have behaved over time (`history`), how much longer the run
+in progress needs (`eta`), and where the time inside one test went (`steps`).
+The estimate is the median of each remaining test's past durations, plus what
+the run has already spent, so a slow mirror makes the estimate larger instead of
+making a test fail.
 
     python3 test/timings.py record  --log run.log --run 1699999999
     python3 test/timings.py eta     --class <class> --run 1699999999 --log run.log
     python3 test/timings.py history [--class <class>]
+    python3 test/timings.py steps   [--run 1699999999]
 
 The database defaults to test/.timings.db beside this script and can be queried
 with any SQLite client.
@@ -28,6 +34,7 @@ import sys
 from datetime import datetime, timezone
 
 LINE = re.compile(r"timing: (\S+)#(\S+) (\d+)ms (passed|failed)")
+STEP = re.compile(r"step:(.+?) (\d+)ms\b")
 DEFAULT_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".timings.db")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS timings (
@@ -41,6 +48,16 @@ CREATE TABLE IF NOT EXISTS timings (
     UNIQUE (run, test)
 );
 CREATE INDEX IF NOT EXISTS timings_by_test ON timings (class, test);
+CREATE TABLE IF NOT EXISTS steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run TEXT NOT NULL,
+    class TEXT NOT NULL,
+    test TEXT NOT NULL,
+    step TEXT NOT NULL,
+    millis INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS steps_by_test ON steps (run, class, test);
 """
 
 
@@ -56,17 +73,35 @@ def ingest(db, log, run):
         return 0
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     added = 0
+    pending = []
     with open(log, errors="replace") as stream:
         for line in stream:
+            step = STEP.search(line)
+            if step:
+                pending.append((step.group(1).strip(), int(step.group(2))))
+                continue
             found = LINE.search(line)
-            if found:
-                added += db.execute(
-                    "INSERT OR IGNORE INTO timings"
-                    " (run, class, test, outcome, millis, recorded_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?)",
-                    (run, found.group(1), found.group(2), found.group(4),
-                     int(found.group(3)), stamp),
-                ).rowcount
+            if not found:
+                continue
+            row = db.execute(
+                "INSERT OR IGNORE INTO timings"
+                " (run, class, test, outcome, millis, recorded_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (run, found.group(1), found.group(2), found.group(4),
+                 int(found.group(3)), stamp),
+            )
+            added += row.rowcount
+            if row.rowcount:
+                # A step belongs to the test whose timing line follows it. The
+                # log is re-read after every phase, so steps are only stored when
+                # their test is new - otherwise each re-read would repeat them.
+                for name, millis in pending:
+                    db.execute(
+                        "INSERT INTO steps (run, class, test, step, millis, recorded_at)"
+                        " VALUES (?, ?, ?, ?, ?, ?)",
+                        (run, found.group(1), found.group(2), name, millis, stamp),
+                    )
+            pending.clear()
     db.commit()
     return added
 
@@ -144,6 +179,37 @@ def report_history(args):
     return 0
 
 
+def report_steps(args):
+    """Where the time inside each test of one run went."""
+    db = connect(args.db)
+    run = args.run
+    if not run:
+        found = db.execute(
+            "SELECT run FROM timings ORDER BY CAST(run AS INTEGER) DESC LIMIT 1"
+        ).fetchone()
+        if not found:
+            print("no timings recorded yet")
+            return 0
+        run = found[0]
+    rows = list(db.execute(
+        "SELECT class, test, millis FROM timings WHERE run = ? ORDER BY millis DESC",
+        (run,)))
+    if not rows:
+        print("no timings for run %s" % run)
+        return 0
+    print("run %s: %s in %d test(s)" % (run, seconds(sum(row[2] for row in rows)), len(rows)))
+    for room, test, millis in rows:
+        steps = list(db.execute(
+            "SELECT step, millis FROM steps WHERE run = ? AND class = ? AND test = ?"
+            " ORDER BY id", (run, room, test)))
+        covered = sum(step[1] for step in steps)
+        print("  %-50s %6s  (%s in %d step(s))"
+              % (test, seconds(millis), seconds(covered), len(steps)))
+        for name, took in steps:
+            print("      %-46s %6s" % (name, seconds(took)))
+    return 0
+
+
 def main(argv):
     # --db is accepted on either side of the subcommand: before it here, after it
     # through `common`, where SUPPRESS keeps the inner default from wiping the
@@ -172,6 +238,11 @@ def main(argv):
                              help="per-test durations recorded so far")
     history.add_argument("--class", dest="class_", default="")
     history.set_defaults(handler=report_history)
+
+    steps = sub.add_parser("steps", parents=[common],
+                           help="where the time inside each test went")
+    steps.add_argument("--run", default="")
+    steps.set_defaults(handler=report_steps)
 
     args = parser.parse_args(argv)
     return args.handler(args)

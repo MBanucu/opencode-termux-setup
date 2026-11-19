@@ -297,6 +297,9 @@ if $timing; then
     echo
     echo "== timings (test/.timings.db) =="
     python3 "$timings" history --db "$timings_db" || true
+    echo
+    echo "== where the time went (test/.timings.db) =="
+    python3 "$timings" steps --db "$timings_db" --run "$run_id" || true
 fi
 
 if [ -n "$recording_saved" ]; then

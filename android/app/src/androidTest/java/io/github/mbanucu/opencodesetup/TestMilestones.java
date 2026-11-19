@@ -42,6 +42,38 @@ public final class TestMilestones {
         return new Busy(name);
     }
 
+    /**
+     * Times one part of a test and logs it as {@code step:<name> <ms>ms}.
+     *
+     * <p>The harness turns these lines into rows in {@code test/.timings.db}, so
+     * a test that takes twelve seconds can be read as the sum of its parts
+     * instead of one number that says nothing about where the time went.
+     */
+    public static Step step(String name) {
+        return new Step(name);
+    }
+
+    /** The timed stretch, closed to log how long it took. */
+    public static final class Step implements Closeable {
+
+        private final String name;
+        private final long started = SystemClock.elapsedRealtime();
+        private boolean closed;
+
+        private Step(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public void close() {
+            if (!closed) {
+                closed = true;
+                Log.i(TAG, "step:" + name + " "
+                        + (SystemClock.elapsedRealtime() - started) + "ms");
+            }
+        }
+    }
+
     /** The declared window, closed to mark its end. */
     public static final class Busy implements Closeable {
 
