@@ -86,17 +86,18 @@ public final class OpencodeTuiTest {
 
     private String awaitScreen(File screen, java.util.function.Predicate<String> wanted)
             throws IOException, InterruptedException {
-        long deadline = System.currentTimeMillis() + AWAIT;
-        String shown = "";
-        while (System.currentTimeMillis() < deadline) {
-            shown = read(screen);
-            if (wanted.test(shown)) {
-                return shown;
+        java.util.function.BooleanSupplier ready = () -> {
+            try {
+                return wanted.test(read(screen));
+            } catch (IOException unreadable) {
+                return false;
             }
-            Thread.sleep(250);
+        };
+        if (!FileWatcher.await(screen, ready, AWAIT)) {
+            throw new AssertionError("the TUI never drew a screen; last screen was: "
+                    + read(screen).replace("\n", " | "));
         }
-        throw new AssertionError("the TUI never drew a screen; last screen was: "
-                + shown.replace("\n", " | "));
+        return read(screen);
     }
 
     private static String read(File file) throws IOException {

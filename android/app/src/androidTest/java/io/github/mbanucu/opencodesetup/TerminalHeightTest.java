@@ -134,17 +134,18 @@ public final class TerminalHeightTest {
         // gone this long without a new line. A fixed sleep was either wasted time
         // or a halfway drawn buffer read on a slow device.
         String log = "";
-        long quietSince = System.currentTimeMillis();
-        long deadline = quietSince + SHORT;
+        long deadline = System.currentTimeMillis() + SHORT;
         while (System.currentTimeMillis() < deadline) {
             String latest = eventsSince(mark);
             if (!latest.equals(log)) {
                 log = latest;
-                quietSince = System.currentTimeMillis();
-            } else if (System.currentTimeMillis() - quietSince >= QUIET) {
+                continue;
+            }
+            // Woken by the next write; when none comes for QUIET, it has settled.
+            long left = Math.min(QUIET, deadline - System.currentTimeMillis());
+            if (left <= 0 || !FileWatcher.awaitChange(eventsFile(), left)) {
                 break;
             }
-            Thread.sleep(50);
         }
         String tail = null;
         Matcher found = Pattern.compile("tail:\\{[^}]*\\}").matcher(log);
@@ -165,8 +166,7 @@ public final class TerminalHeightTest {
      * {@code logcat -d} gave, without a shell process on every 50 ms poll.
      */
     private String eventsSince(long mark) {
-        File file = new File(InstrumentationRegistry.getInstrumentation().getTargetContext()
-                .getExternalFilesDir(null), "events.log");
+        File file = eventsFile();
         if (!file.isFile()) {
             return "";
         }
@@ -181,10 +181,15 @@ public final class TerminalHeightTest {
         }
     }
 
+    /** The file the app logs its events to. */
+    private File eventsFile() {
+        return new File(InstrumentationRegistry.getInstrumentation().getTargetContext()
+                .getExternalFilesDir(null), "events.log");
+    }
+
     /** The event log's length now, so the next reads only see what follows. */
     private long eventsMark() {
-        return new File(InstrumentationRegistry.getInstrumentation().getTargetContext()
-                .getExternalFilesDir(null), "events.log").length();
+        return eventsFile().length();
     }
 
     private int heightOf(String tail) {

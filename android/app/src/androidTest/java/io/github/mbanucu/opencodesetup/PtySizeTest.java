@@ -96,18 +96,19 @@ public final class PtySizeTest {
                 Integer.parseInt(reported.group(2)), ptyRows);
     }
 
-    /** Waits for a line the app itself publishes, instead of sleeping. */
+    /** Waits for a line the app itself publishes, woken by the write itself. */
     private String await(long mark, Pattern pattern) throws IOException, InterruptedException {
-        long deadline = System.currentTimeMillis() + AWAIT;
-        String seen = "";
-        while (System.currentTimeMillis() < deadline) {
-            seen = readFrom(mark);
-            if (pattern.matcher(seen).find()) {
-                return seen;
+        boolean found = FileWatcher.await(events, () -> {
+            try {
+                return pattern.matcher(readFrom(mark)).find();
+            } catch (IOException unreadable) {
+                return false;
             }
-            Thread.sleep(50);
+        }, AWAIT);
+        if (!found) {
+            throw new AssertionError("no line matching " + pattern + " appeared in events.log");
         }
-        throw new AssertionError("no line matching " + pattern + " appeared in events.log");
+        return readFrom(mark);
     }
 
     /** The part of the log written after this test started. */

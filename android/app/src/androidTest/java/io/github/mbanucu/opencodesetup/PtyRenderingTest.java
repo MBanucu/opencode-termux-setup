@@ -186,17 +186,18 @@ public final class PtyRenderingTest {
 
     /** Waits for the terminal to publish a screen that satisfies {@code wanted}. */
     private String awaitScreen(Predicate<String> wanted) throws IOException, InterruptedException {
-        long deadline = System.currentTimeMillis() + AWAIT;
-        String shown = "";
-        while (System.currentTimeMillis() < deadline) {
-            shown = currentScreen();
-            if (wanted.test(shown)) {
-                return shown;
+        java.util.function.BooleanSupplier ready = () -> {
+            try {
+                return wanted.test(currentScreen());
+            } catch (IOException unreadable) {
+                return false;
             }
-            Thread.sleep(50);
+        };
+        if (!FileWatcher.await(screen, ready, AWAIT)) {
+            throw new AssertionError("the screen never showed what was expected; last screen: "
+                    + currentScreen().replace("\n", " | "));
         }
-        throw new AssertionError("the screen never showed what was expected; last screen: "
-                + shown.replace("\n", " | "));
+        return currentScreen();
     }
 
     private String currentScreen() throws IOException {

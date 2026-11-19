@@ -342,35 +342,37 @@ public final class SetupFlowTest {
      * task forward, so the page never changes.
      */
     private void bringToFront() throws Exception {
-        long mark = eventsMark();
-        // Reopened, not restarted: CLEAR_TOP finishes whatever pages sit above
-        // the main one, and SINGLE_TOP hands the intent to the instance that is
-        // already there instead of destroying and rebuilding it. A clear-task
-        // start closed the whole app and paid for a fresh page every time.
-        InstrumentationRegistry.getInstrumentation().getTargetContext().startActivity(
-                new Intent(Intent.ACTION_MAIN)
-                        .setClassName(PACKAGE, PACKAGE + ".MainActivity")
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                                | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                                | Intent.FLAG_ACTIVITY_SINGLE_TOP));
-        // The app says when the page has been laid out, and a file read is
-        // cheaper than the accessibility snapshot this used to poll for.
-        awaitPage(mark, "MainActivity", SHORT);
+        // Already there: the actions are what the next step needs, so a lookup
+        // that finds them is cheaper than reopening the page and waiting for it
+        // to be laid out. A lookup that finds nothing also says the app is not
+        // the page in front, which is exactly when reopening it is right - the
+        // app's own log cannot see a window that something else has covered.
+        if (!device.hasObject(By.text("Check setup"))) {
+            long mark = eventsMark();
+            // Reopened, not restarted: CLEAR_TOP finishes whatever pages sit
+            // above the main one, and SINGLE_TOP hands the intent to the
+            // instance already there instead of rebuilding it.
+            InstrumentationRegistry.getInstrumentation().getTargetContext().startActivity(
+                    new Intent(Intent.ACTION_MAIN)
+                            .setClassName(PACKAGE, PACKAGE + ".MainActivity")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                    | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                    | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+            // The app says when the page has been laid out; the wait after it is
+            // for accessibility to see the actions it has just laid out.
+            awaitPage(mark, "MainActivity", SHORT);
+            device.wait(Until.hasObject(By.text("Install opencode")), SHORT);
+        }
         assertTrue("the app is in the foreground, with its actions in view: " + diagnosis(),
                 scrollToTop());
     }
 
     /** Waits for the app to say a page has been laid out, read from its own log. */
     private void awaitPage(long mark, String name, long budget) throws Exception {
-        long deadline = System.currentTimeMillis() + budget;
         String wanted = "page:" + name + " ready";
-        while (System.currentTimeMillis() < deadline) {
-            if (eventsSince(mark).contains(wanted)) {
-                return;
-            }
-            Thread.sleep(20);
+        if (!FileWatcher.await(eventsFile(), () -> eventsSince(mark).contains(wanted), budget)) {
+            fail("the " + name + " page never said it was laid out: " + diagnosis());
         }
-        fail("the " + name + " page never said it was laid out: " + diagnosis());
     }
 
     /**
@@ -443,15 +445,13 @@ public final class SetupFlowTest {
      * run or from the final result - and no shell round trip is spent asking.
      */
     private String streamingText(long mark) throws Exception {
-        long deadline = System.currentTimeMillis() + STREAM;
-        while (System.currentTimeMillis() < deadline) {
-            Matcher stream = Pattern.compile("stream:(\\d+)").matcher(eventsSince(mark));
-            if (stream.find()) {
-                return "streamed " + stream.group(1) + " bytes while running";
-            }
-            Thread.sleep(50);
+        boolean chunk = FileWatcher.await(eventsFile(),
+                () -> eventsSince(mark).contains("stream:"), STREAM);
+        if (!chunk) {
+            return null;
         }
-        return null;
+        Matcher stream = Pattern.compile("stream:(\\d+)").matcher(eventsSince(mark));
+        return stream.find() ? "streamed " + stream.group(1) + " bytes while running" : null;
     }
 
     /**
@@ -589,30 +589,27 @@ public final class SetupFlowTest {
      * and the check's answer overwrite each other in {@code last-result.txt}.
      */
     private void waitForResult(long mark, long stall) throws Exception {
-        long lastProgress = System.currentTimeMillis();
-        String seen = "";
+        long silence = System.currentTimeMillis() + stall;
         long bytes = 0;
-        while (System.currentTimeMillis() - lastProgress < stall) {
+        while (true) {
             String log = eventsSince(mark);
             if (log.contains("result: ")) {
                 return;
             }
-            Matcher chunk = Pattern.compile("stream:(\\d+)").matcher(log);
-            StringBuilder sizes = new StringBuilder();
-            while (chunk.find()) {
-                sizes.append(chunk.group(1)).append(',');
+            Matcher counted = Pattern.compile("stream:(\\d+)").matcher(log);
+            bytes = 0;
+            while (counted.find()) {
+                bytes += Long.parseLong(counted.group(1));
             }
-            String progress = sizes + "|" + read(liveOutputFile());
-            if (!progress.equals(seen)) {
-                seen = progress;
-                lastProgress = System.currentTimeMillis();
-                bytes = 0;
-                Matcher counted = Pattern.compile("stream:(\\d+)").matcher(log);
-                while (counted.find()) {
-                    bytes += Long.parseLong(counted.group(1));
-                }
+            long left = silence - System.currentTimeMillis();
+            if (left <= 0) {
+                break;
             }
-            Thread.sleep(100);
+            // Woken by the write itself rather than by a timer, and every write
+            // is progress: the silence clock starts again from it.
+            if (FileWatcher.awaitChange(eventsFile(), left)) {
+                silence = System.currentTimeMillis() + stall;
+            }
         }
         fail("the command streamed " + bytes + " bytes and then produced nothing for "
                 + (stall / 1000) + "s. " + diagnosis());
@@ -625,15 +622,11 @@ public final class SetupFlowTest {
      */
     private String awaitFile(File file, Predicate<String> acceptable, long budget)
             throws Exception {
-        long deadline = System.currentTimeMillis() + budget;
-        while (System.currentTimeMillis() < deadline) {
+        boolean found = FileWatcher.await(file, () -> {
             String text = read(file);
-            if (text != null && acceptable.test(text)) {
-                return text;
-            }
-            Thread.sleep(100);
-        }
-        return null;
+            return text != null && acceptable.test(text);
+        }, budget);
+        return found ? read(file) : null;
     }
 
     private String read(File file) {
