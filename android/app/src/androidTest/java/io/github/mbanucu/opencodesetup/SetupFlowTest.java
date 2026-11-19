@@ -314,12 +314,6 @@ public final class SetupFlowTest {
                 device.wait(Until.hasObject(By.text("Check setup")), 30_000));
     }
 
-    /** The last result the app received from Termux, or null before the first. */
-    private String resultText() {
-        UiObject2 node = device.findObject(By.descContains("exit code"));
-        return node == null ? null : node.getContentDescription();
-    }
-
     /** Fails at the moment output should have started, quoting what happened. */
     private void assertStreamed(String message) throws Exception {
         if (streamingText() == null) {
@@ -339,7 +333,8 @@ public final class SetupFlowTest {
         while (text.find() && visible.length() < 300) {
             visible.append(visible.length() == 0 ? "" : " | ").append(text.group(1));
         }
-        return "screen [" + visible + "] events [" + logTail() + "]";
+        return "screen [" + visible + "] answer [" + read(resultFile())
+                + "] shown [" + read(liveOutputFile()) + "] events [" + logTail() + "]";
     }
 
     /** The last events the app recorded, on one line whose wording is greppable. */
@@ -398,11 +393,13 @@ public final class SetupFlowTest {
             fail("the check did not answer within " + (POLL / 1000) + "s. " + diagnosis());
         }
 
-        // The terminal repaints at most once a second, so the answer has to end
-        // up on the page as well: a file the user never sees is not the feature.
+        // The answer has to end up on the page as well, and the terminal node is
+        // not a reliable thing to poll while it repaints. live-output.txt is
+        // written from the text the emulator is showing, so it is the proof that
+        // the page has it.
         String firstLine = text.trim().split("\n")[0].trim();
         if (!firstLine.isEmpty()
-                && !device.wait(Until.hasObject(By.descContains(firstLine)), SHORT)) {
+                && awaitFile(liveOutputFile(), value -> value.contains(firstLine), SHORT) == null) {
             fail("Termux answered but the page does not show it: " + diagnosis());
         }
         return text;
@@ -412,6 +409,12 @@ public final class SetupFlowTest {
     private File resultFile() {
         return new File(InstrumentationRegistry.getInstrumentation()
                 .getTargetContext().getExternalFilesDir(null), "last-result.txt");
+    }
+
+    /** What the terminal is showing, written by the page itself. */
+    private File liveOutputFile() {
+        return new File(InstrumentationRegistry.getInstrumentation()
+                .getTargetContext().getExternalFilesDir(null), "live-output.txt");
     }
 
     /**
