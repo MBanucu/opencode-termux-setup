@@ -22,6 +22,8 @@ import java.nio.charset.StandardCharsets;
  *
  * <p>{@code command} is {@code install}, {@code uninstall} or {@code check};
  * {@code --ez purge true} turns an uninstall into {@code uninstall.sh --purge}.
+ * Everything runs in Termux's background runner, so no Termux window appears on
+ * top of whatever is on screen.
  *
  * <p>It is an activity and not a broadcast receiver for a boring Android reason:
  * starting a service in another app from a background receiver is refused, so
@@ -58,7 +60,7 @@ public final class AdbCommandActivity extends Activity {
             switch (command) {
                 case "install":
                     TermuxCommands.send(this, Commands.INSTALL, "Install opencode",
-                            "Add the opencode apt repository and install opencode", false);
+                            "Add the opencode apt repository and install opencode");
                     return "sent install\n" + Commands.INSTALL;
 
                 case "uninstall":
@@ -66,8 +68,7 @@ public final class AdbCommandActivity extends Activity {
                             "Uninstall opencode",
                             purge
                                     ? "Remove the opencode package, its apt repository and all its data"
-                                    : "Remove the opencode package and its apt repository, keeping its data",
-                            false);
+                                    : "Remove the opencode package and its apt repository, keeping its data");
                     return "sent " + (purge ? "uninstall --purge" : "uninstall keeping settings")
                             + "\n" + (purge ? Commands.UNINSTALL_PURGE : Commands.UNINSTALL);
 
@@ -76,7 +77,7 @@ public final class AdbCommandActivity extends Activity {
                     // stale file is cleared rather than overwritten.
                     clearResult();
                     TermuxCommands.send(this, Commands.CHECK, "Check opencode",
-                            "Report the installed opencode version", true);
+                            "Report the installed opencode version");
                     return "sent check; the answer replaces last-result.txt";
 
                 default:

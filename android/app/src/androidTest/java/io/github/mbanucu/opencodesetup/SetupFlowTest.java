@@ -37,9 +37,9 @@ import java.util.regex.Pattern;
  *
  * <p>The Termux side is real, and it is not simulated anywhere. "Uninstall
  * opencode" opens a page where the choice between keeping and deleting the
- * user's data is made; both outcomes send their own command on the visible
- * {@code terminal-session} runner, so the event that proves the handoff is
- * Termux's own window taking the foreground. Whether the command actually
+ * user's data is made; both outcomes send their own command on Termux's
+ * background runner, so this app stays in front and the command's output arrives
+ * on the page that sent it. Whether the command actually
  * changed the system is then answered by "Check setup", which runs
  * {@code opencode --version} in Termux and reports the result back through a
  * {@code PendingIntent}. The suite therefore removes opencode from the device
@@ -191,9 +191,13 @@ public final class SetupFlowTest {
         assertNotNull("the page offers the action", remove);
         remove.click();
 
-        assertTrue("the removal is handed to the Termux window",
-                device.wait(Until.hasObject(By.pkg(TERMUX)), LONG));
-        shot("05-uninstall-running.png");
+        // Nothing may be raised over this app: the command runs in Termux's
+        // background runner and its output comes back to this page.
+        assertTrue("the app stays in front",
+                device.wait(Until.hasObject(By.pkg(PACKAGE)), SHORT));
+        assertFalse("the Termux window was not brought forward",
+                device.hasObject(By.pkg(TERMUX)));
+        shot("05-uninstall-started.png");
 
         String report = checkUntil(CHECK_REMOVED, UNINSTALL_BUDGET);
         assertTrue("the check that reported the removal ran in the app: " + report,
@@ -219,9 +223,11 @@ public final class SetupFlowTest {
         assertNotNull("the dialog offers to start the setup", accept);
         accept.click();
 
-        assertTrue("the setup is handed to the Termux window",
-                device.wait(Until.hasObject(By.pkg(TERMUX)), LONG));
-        shot("07-install-running.png");
+        assertTrue("the app stays in front",
+                device.wait(Until.hasObject(By.pkg(PACKAGE)), SHORT));
+        assertFalse("the Termux window was not brought forward",
+                device.hasObject(By.pkg(TERMUX)));
+        shot("07-install-started.png");
 
         String report = checkUntil(CHECK_INSTALLED, INSTALL_BUDGET);
         assertTrue("the check that reported the version ran in the app: " + report,

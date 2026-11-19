@@ -6,7 +6,8 @@ import android.os.Bundle;
  * The install consent, as a page rather than a dialog.
  *
  * <p>It says what will be downloaded and by whom, shows the command, and then
- * prints the install itself while Termux runs it.
+ * prints the install itself as Termux runs it in the background - the window
+ * never changes.
  */
 public final class InstallActivity extends PageActivity {
 
@@ -17,7 +18,7 @@ public final class InstallActivity extends PageActivity {
         body(R.string.consent_message);
         outputBox();
         button(R.string.consent_accept, v -> runCommand(Commands.INSTALL, "Install opencode",
-                "Add the opencode apt repository and install opencode", false));
+                "Add the opencode apt repository and install opencode"));
         button(R.string.consent_cancel, v -> finish());
     }
 }

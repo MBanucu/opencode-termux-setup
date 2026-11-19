@@ -10,9 +10,9 @@ import android.widget.TextView;
  * Setup companion for opencode on Termux.
  *
  * <p>It owns no code that installs anything: it explains the download, opens a
- * page for consent, and sends one command to Termux through RUN_COMMAND. Every
- * state it shows comes from running {@code opencode --version} in Termux, printed
- * in the output box on this page.
+ * page for consent, and sends one command to Termux through RUN_COMMAND. Termux
+ * stays in the background; every state it shows comes from running
+ * {@code opencode --version} in Termux and printing the answer on this page.
  */
 public final class MainActivity extends PageActivity {
 
@@ -51,7 +51,7 @@ public final class MainActivity extends PageActivity {
         if (!requireTermux()) {
             return;
         }
-        runCommand(Commands.CHECK, "Check opencode", "Report the installed opencode version", true);
+        runCommand(Commands.CHECK, "Check opencode", "Report the installed opencode version");
     }
 
     private void openTermux() {

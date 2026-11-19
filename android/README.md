@@ -11,9 +11,9 @@ hands exactly one command to Termux via `RUN_COMMAND`:
 curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/install.sh | bash
 ```
 
-The visible `terminal-session` runner runs it in the Termux window, so the
-download progress is yours to watch and Ctrl+C works. "Check setup" uses the
-background `app-shell` runner and prints `opencode --version` back in the app.
+Every command runs on Termux's background `app-shell` runner, so Termux is never
+brought to the front: the screen you are on stays up and each command's output is
+printed on the page that started it.
 
 "Uninstall opencode" opens a page instead of a dialog, because removing the
 package and deleting the user's data are very different outcomes. The page
@@ -116,8 +116,8 @@ another app from a background receiver is refused on modern Android, so the
 dispatch has to happen while this app is in the foreground. `command` takes
 `install`, `uninstall` or `check`; `purge` turns the uninstall into
 `uninstall.sh --purge`. Because it is exported, any app on the device can start
-it - it can only do what Termux allows, and the visible runner still shows every
-install or removal in the Termux window.
+it - it can only do what Termux allows, and every command still runs in Termux
+under the user's own shell.
 
 ## Layout
 

@@ -23,8 +23,9 @@ import android.widget.TextView;
  *
  * <p>Every screen extends it, so the output of the command a page starts is
  * printed on that page - the install page shows the install, the uninstall page
- * shows the removal, the main page shows the check. Results arrive from Termux
- * through {@link RunCommandReceiver} while the page is resumed, and a result that
+ * shows the removal, the main page shows the check, and no command raises the
+ * Termux window. Results arrive from Termux through {@link RunCommandReceiver}
+ * while the page is resumed, and a result that
  * arrives while another page is on top is handed over on the next resume.
  *
  * <p>Nothing here is a dialog: consent, failures and the refusal notice are all
@@ -184,17 +185,16 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
      * Sends one command to Termux, asking for its permission first if needed.
      * Whatever comes back is printed in this page's output box.
      */
-    protected void runCommand(String command, String label, String description,
-                              boolean background) {
+    protected void runCommand(String command, String label, String description) {
         if (checkSelfPermission(TermuxCommands.PERMISSION) != PackageManager.PERMISSION_GRANTED) {
             Log.i(TAG, "asking for " + TermuxCommands.PERMISSION);
             // RUN_COMMAND is a dangerous permission owned by Termux; without it
             // startService throws and the reason looks like a settings problem.
-            pending = () -> send(command, label, description, background);
+            pending = () -> send(command, label, description);
             requestPermissions(new String[] {TermuxCommands.PERMISSION}, REQUEST_RUN_COMMAND);
             return;
         }
-        send(command, label, description, background);
+        send(command, label, description);
     }
 
     @Override
@@ -212,9 +212,9 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         }
     }
 
-    private void send(String command, String label, String description, boolean background) {
+    private void send(String command, String label, String description) {
         try {
-            TermuxCommands.send(this, command, label, description, background);
+            TermuxCommands.send(this, command, label, description);
             clearNotice();
         } catch (RuntimeException refused) {
             Log.w(TAG, "Termux refused the command", refused);

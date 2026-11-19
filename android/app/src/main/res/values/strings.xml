@@ -11,7 +11,7 @@
     <string name="action_uninstall">Uninstall opencode</string>
     <string name="action_open">Open Termux</string>
 
-    <string name="hint">Setup runs in Termux, where you can watch it; the command is in the confirmation dialog first.
+    <string name="hint">Setup runs inside Termux in the background, so this screen stays in front and every command prints its output here.
 
 You may need Termux\'s \"allow external apps\" setting for this app to send commands: add allow-external-apps=true to ~/.termux/termux.properties.</string>
 
@@ -53,6 +53,5 @@ Add that line to ~/.termux/termux.properties inside Termux, then run termux-relo
     <string name="missing_message">This app does not install opencode by itself: it starts the install in Termux. Install Termux from F-Droid, then come back.</string>
 
     <string name="missing_positive">Open F-Droid</string>
-    <string name="missing_negative">Close</string>
 
 </resources>

@@ -87,7 +87,6 @@ public final class UninstallActivity extends PageActivity {
                 "Uninstall opencode",
                 purging()
                         ? "Remove the opencode package, its apt repository and all its data"
-                        : "Remove the opencode package and its apt repository, keeping its data",
-                false);
+                        : "Remove the opencode package and its apt repository, keeping its data");
     }
 }

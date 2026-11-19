@@ -8,8 +8,11 @@ import android.util.Log;
 /**
  * The one place that builds and sends a Termux RUN_COMMAND.
  *
- * <p>Both activities use it: the main screen for install and check, the
- * uninstall page for either of its two commands.
+ * <p>Everything goes out on the background {@code app-shell} runner on purpose:
+ * a {@code terminal-session} command raises the Termux window, which takes the
+ * user out of this app mid-flow. Running in the background keeps this screen in
+ * front, and the command's output comes back through {@link RunCommandReceiver}
+ * to be printed on the page that sent it.
  */
 final class TermuxCommands {
 
@@ -29,8 +32,7 @@ final class TermuxCommands {
     private TermuxCommands() {
     }
 
-    static void send(Context context, String command, String label, String description,
-                     boolean background) {
+    static void send(Context context, String command, String label, String description) {
         PendingIntent result = PendingIntent.getBroadcast(context, 0,
                 new Intent(RunCommandReceiver.ACTION_RESULT).setPackage(context.getPackageName()),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
@@ -41,15 +43,8 @@ final class TermuxCommands {
         intent.putExtra("com.termux.RUN_COMMAND_PATH", BASH);
         intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-lc", command});
         intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", HOME);
-        // A background command reports its output through the PendingIntent; a
-        // visible one runs in the Termux window, and this Termux also delivers
-        // its output when it finishes, so the app shows whatever arrives.
-        // Current Termux picks the runner; the boolean is the older spelling of
-        // the same choice and is still honoured as a fallback.
-        intent.putExtra("com.termux.RUN_COMMAND_RUNNER",
-                background ? "app-shell" : "terminal-session");
-        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", background);
-        intent.putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0");
+        intent.putExtra("com.termux.RUN_COMMAND_RUNNER", "app-shell");
+        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
         intent.putExtra("com.termux.RUN_COMMAND_COMMAND_LABEL", label);
         intent.putExtra("com.termux.RUN_COMMAND_COMMAND_DESCRIPTION", description);
         intent.putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", result);
@@ -57,6 +52,6 @@ final class TermuxCommands {
         // RuntimeExceptions are surfaced to the caller, which explains the
         // allow-external-apps setting instead of failing silently.
         context.startService(intent);
-        Log.i(TAG, "sent " + (background ? "app-shell" : "terminal-session") + ": " + label);
+        Log.i(TAG, "sent app-shell: " + label);
     }
 }
