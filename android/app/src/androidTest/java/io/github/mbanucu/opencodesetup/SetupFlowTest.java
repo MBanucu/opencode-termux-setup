@@ -56,7 +56,7 @@ public final class SetupFlowTest {
     }
 
     @Test
-    public void aMainScreenOffersTheThreeActions() {
+    public void aMainScreenOffersTheThreeActions() throws Exception {
         assertNotNull("install", device.findObject(By.text("Install opencode")));
         assertNotNull("check", device.findObject(By.text("Check setup")));
         assertNotNull("open Termux", device.findObject(By.text("Open Termux")));
