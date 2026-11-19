@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Setup companion for opencode on Termux.
+
+  It does not bundle opencode: it explains what will be downloaded, asks for
+  consent, and hands a single command to Termux through RUN_COMMAND.  The only
+  permission it asks for is Termux's own RUN_COMMAND permission.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- Without this, Android 11+ hides Termux from us entirely. -->
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        tools:ignore="DataExtractionRules">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Termux answers the PendingIntent we hand it on this action. -->
+        <receiver
+            android:name=".RunCommandReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="io.github.mbanucu.opencodesetup.RUN_COMMAND_RESULT" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

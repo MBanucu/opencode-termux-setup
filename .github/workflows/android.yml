@@ -1,0 +1,65 @@
+name: android
+
+# Builds the setup app.  The scaffold was written without an Android SDK, so
+# this workflow is the compiler: it is what turns "probably builds" into an APK
+# that can be installed on a device.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build debug apk
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        run: |
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          manager=$(command -v sdkmanager || echo "$sdk/cmdline-tools/latest/bin/sdkmanager")
+          yes | "$manager" --licenses >/dev/null 2>&1 || true
+          "$manager" "platforms;android-35" "build-tools;35.0.0" "platform-tools" >/dev/null
+          echo "sdk=$sdk" >>"$GITHUB_ENV"
+
+      - name: Wrapper
+        working-directory: android
+        run: ./gradlew --version | sed -n '1,8p'
+
+      - name: Assemble
+        working-directory: android
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Report the apk
+        working-directory: android
+        run: |
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          ls -l "$apk"
+          sha256sum "$apk"
+          "$sdk/build-tools/35.0.0/aapt2" dump badging "$apk" 2>/dev/null |
+            grep -E '^(package|sdkVersion|targetSdkVersion|application-label|uses-permission)' |
+            head -10 || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opencode-setup-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      # Advisory while the app is young.
+      - name: Lint (advisory)
+        continue-on-error: true
+        working-directory: android
+        run: ./gradlew --no-daemon lintDebug

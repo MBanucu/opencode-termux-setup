@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">opencode-setup</string>
+    <string name="tagline">Install the OpenCode coding agent in Termux — one button, native build, no proot.</string>
+
+    <string name="status_termux_installed">Termux is installed.</string>
+    <string name="status_termux_missing">Termux is not installed. Install it first; this app only handles setup.</string>
+
+    <string name="action_check">Check setup</string>
+    <string name="action_install">Install opencode</string>
+    <string name="action_open">Open Termux</string>
+
+    <string name="hint">Setup runs in Termux, where you can watch it; the command is in the confirmation dialog first.
+
+You may need Termux\'s \"allow external apps\" setting for this app to send commands: add allow-external-apps=true to ~/.termux/termux.properties.</string>
+
+    <string name="consent_title">Download about 70 MB?</string>
+    <string name="consent_message">Termux will add a signed APT repository and install:
+
+• the opencode package (~70 MB download, ~209 MB installed) — a native Android/aarch64 build from the third-party project bd-loser/opencode-bionic, since upstream ships glibc-only binaries that cannot run in Termux,
+• nothing else: no proot, no glibc runtime, no npm.
+
+The command, run in Termux:
+
+curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/install.sh | bash
+
+Nothing is uploaded. Use Wi-Fi if mobile data is metered. You can cancel now and run the same step by hand later.</string>
+    <string name="consent_accept">Start setup</string>
+    <string name="consent_cancel">Cancel</string>
+
+    <string name="permission_title">Termux refused the command</string>
+    <string name="permission_message">Termux only accepts commands from other apps when this is enabled in its own settings:
+
+  allow-external-apps=true
+
+Add that line to ~/.termux/termux.properties inside Termux, then run termux-reload-settings (or restart Termux), and try again. The command is copied to the clipboard for you.</string>
+
+    <string name="permission_denied_title">Permission needed</string>
+    <string name="permission_denied_message">This app hands exactly one command to Termux, and Termux only accepts it with its RUN_COMMAND permission granted. Android asked for it and the request was declined.</string>
+    <string name="permission_settings">Open settings</string>
+
+    <string name="missing_title">Termux is required</string>
+    <string name="missing_message">This app does not install opencode by itself: it starts the install in Termux. Install Termux from F-Droid, then come back.</string>
+
+    <string name="missing_positive">Open F-Droid</string>
+    <string name="missing_negative">Close</string>
+
+    <string name="dialog_close">Close</string>
+</resources>

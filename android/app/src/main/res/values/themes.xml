@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Monochrome on purpose: opencode's own identity is black and white. -->
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#101418</item>
+        <item name="android:colorPrimaryDark">#101418</item>
+        <item name="android:colorAccent">#101418</item>
+        <item name="android:statusBarColor">#fafafa</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowBackground">#fafafa</item>
+    </style>
+</resources>
