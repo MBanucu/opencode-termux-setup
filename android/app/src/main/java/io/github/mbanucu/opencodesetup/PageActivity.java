@@ -603,9 +603,15 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         }
         frame.post(() -> {
             script("fitNow()");
-            // A long page can put the terminal below the fold; bring it into
-            // view so the output is seen as it arrives.
-            page.smoothScrollTo(0, frame.getTop());
+            // Scroll so the terminal's *last* line is on screen, not just its
+            // top: a tall terminal, or a landscape screen, otherwise ends below
+            // the fold and the newest output is never seen as it arrives.
+            int viewport = page.getHeight();
+            int target = viewport <= 0
+                    ? frame.getTop()
+                    : Math.min(frame.getTop(),
+                            Math.max(0, frame.getBottom() - viewport + dp(8)));
+            page.smoothScrollTo(0, target);
         });
     }
 
