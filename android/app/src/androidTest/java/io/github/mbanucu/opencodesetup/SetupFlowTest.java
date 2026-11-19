@@ -17,6 +17,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.MethodSorters;
 
 import java.io.File;
+import java.util.regex.Pattern;
 
 /**
  * Drives the real app on a device through accessibility, not through
@@ -82,7 +83,12 @@ public final class SetupFlowTest {
                 text.contains("third-party"));
         shot("02-consent.png");
 
-        device.findObject(By.text("Cancel")).click();
+        // Platform dialog buttons are rendered uppercase, so match the label
+        // the accessibility tree reports rather than the string resource.
+        UiObject2 cancel = device.wait(
+                Until.findObject(By.text(Pattern.compile("(?i)^cancel$"))), SHORT);
+        assertNotNull("the dialog offers a cancel button", cancel);
+        cancel.click();
         assertTrue("cancel closes the dialog and runs nothing",
                 device.wait(Until.gone(By.text("Download about 70 MB?")), SHORT));
     }
