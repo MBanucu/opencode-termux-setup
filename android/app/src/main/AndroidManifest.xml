@@ -4,12 +4,18 @@
 
   It does not bundle opencode: it explains what will be downloaded, asks for
   consent, and hands a single command to Termux through RUN_COMMAND.  The only
-  permission it asks for is Termux's own RUN_COMMAND permission.
+  permission it asks the user for is Termux's own RUN_COMMAND permission; it
+  also holds INTERNET so a loopback socket can carry the command's output back
+  to the page while it runs.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- Only for the loopback socket Termux streams a running command's output
+         to; nothing leaves the device and no other host is contacted. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Without this, Android 11+ hides Termux from us entirely. -->
     <queries>

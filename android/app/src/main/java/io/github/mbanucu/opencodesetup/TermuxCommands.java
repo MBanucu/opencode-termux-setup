@@ -33,6 +33,15 @@ final class TermuxCommands {
     }
 
     static void send(Context context, String command, String label, String description) {
+        send(context, command, label, description, 0);
+    }
+
+    /**
+     * Sends the command, telling Termux to copy its output to a loopback
+     * {@code port} while it runs. {@code 0} means no live stream: only the
+     * result bundle comes back.
+     */
+    static void send(Context context, String command, String label, String description, int port) {
         PendingIntent result = PendingIntent.getBroadcast(context, 0,
                 new Intent(RunCommandReceiver.ACTION_RESULT).setPackage(context.getPackageName()),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
@@ -41,7 +50,7 @@ final class TermuxCommands {
         intent.setClassName(TERMUX_PACKAGE, SERVICE);
         intent.setAction(ACTION);
         intent.putExtra("com.termux.RUN_COMMAND_PATH", BASH);
-        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-lc", command});
+        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-lc", wrap(command, port)});
         intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", HOME);
         intent.putExtra("com.termux.RUN_COMMAND_RUNNER", "app-shell");
         intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
@@ -53,5 +62,29 @@ final class TermuxCommands {
         // allow-external-apps setting instead of failing silently.
         context.startService(intent);
         Log.i(TAG, "sent app-shell: " + label);
+    }
+
+    /**
+     * Runs the command under a pseudo terminal, the way the Termux window does,
+     * so progress bars and colours exist at all, and copies its output to the
+     * caller's port as it is written.
+     *
+     * <p>{@code script} gives the command a PTY; {@code tee} sends the same bytes
+     * to the app and to Termux, so the result bundle is unchanged. If Termux has
+     * no {@code script}, the command still runs and streams, just without a PTY.
+     */
+    private static String wrap(String command, int port) {
+        String quoted = "'" + command.replace("'", "'\\''") + "'";
+        String run = "if command -v script >/dev/null 2>&1; then "
+                + "TERM=xterm-256color script -q -f -e -c \"bash -lc " + quoted + "\" /dev/null; "
+                + "else bash -lc " + quoted + "; fi";
+        if (port <= 0) {
+            return run;
+        }
+        // fd 3 is the app's listener; when that cannot be opened the command
+        // still runs and Termux still gets the output.
+        return "exec 3<>/dev/tcp/127.0.0.1/" + port + " 2>/dev/null || exec 3>/dev/null; "
+                + "{ " + run + " ; } 2>&1 | stdbuf -oL tee >(cat >&3); "
+                + "exit ${PIPESTATUS[0]}";
     }
 }

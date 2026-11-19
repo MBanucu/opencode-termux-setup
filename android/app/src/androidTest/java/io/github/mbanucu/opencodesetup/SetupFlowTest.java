@@ -77,6 +77,9 @@ public final class SetupFlowTest {
     private static final Pattern CHECK_INSTALLED =
             Pattern.compile("(?s)^opencode v\\S+\\n+\\nexit code 0$");
 
+    /** What the box says before the first line of output arrives. */
+    private static final String WAITING = "Running in Termux";
+
     private UiDevice device;
 
     @Before
@@ -198,6 +201,8 @@ public final class SetupFlowTest {
         assertFalse("the Termux window was not brought forward",
                 device.hasObject(By.pkg(TERMUX)));
         shot("05-uninstall-started.png");
+        assertNotNull("the page shows Termux's output while the removal is still running",
+                streamingText());
 
         String report = checkUntil(CHECK_REMOVED, UNINSTALL_BUDGET);
         assertTrue("the check that reported the removal ran in the app: " + report,
@@ -228,6 +233,8 @@ public final class SetupFlowTest {
         assertFalse("the Termux window was not brought forward",
                 device.hasObject(By.pkg(TERMUX)));
         shot("07-install-started.png");
+        assertNotNull("the page shows the install as it happens, not only at the end",
+                streamingText());
 
         String report = checkUntil(CHECK_INSTALLED, INSTALL_BUDGET);
         assertTrue("the check that reported the version ran in the app: " + report,
@@ -263,8 +270,21 @@ public final class SetupFlowTest {
 
     // --- helpers -------------------------------------------------------------
 
+    /**
+     * Gets back to the main page the way a user does: back out of whichever page
+     * is open. {@code am start} alone is not enough - when the activity is
+     * already in this app's stack the system delivers the intent to it
+     * (result code 3) instead of bringing the task forward, so the page never
+     * changes.
+     */
     private void bringToFront() throws Exception {
-        device.executeShellCommand("am start -W -n " + PACKAGE + "/.MainActivity");
+        for (int attempt = 0; attempt < 3 && !device.hasObject(By.text("Check setup")); attempt++) {
+            device.pressBack();
+            device.waitForIdle();
+        }
+        if (!device.hasObject(By.text("Check setup"))) {
+            device.executeShellCommand("am start -W -n " + PACKAGE + "/.MainActivity");
+        }
         assertTrue("the app is in the foreground",
                 device.wait(Until.hasObject(By.text("Check setup")), 30_000));
     }
@@ -273,6 +293,26 @@ public final class SetupFlowTest {
     private String resultText() {
         UiObject2 node = device.findObject(By.textContains("exit code"));
         return node == null ? null : node.getText();
+    }
+
+    /**
+     * The terminal box once it holds real output that is not the final answer
+     * yet. This is what makes the run streamed: the text appears while Termux
+     * is still working, not in one block when it exits.
+     */
+    private String streamingText() {
+        long deadline = System.currentTimeMillis() + POLL;
+        while (System.currentTimeMillis() < deadline) {
+            UiObject2 box = device.findObject(By.res(PACKAGE, "output"));
+            if (box != null) {
+                String text = box.getText();
+                if (text != null && !text.trim().isEmpty()
+                        && !text.startsWith(WAITING) && !text.contains("exit code")) {
+                    return text;
+                }
+            }
+        }
+        return null;
     }
 
     /**

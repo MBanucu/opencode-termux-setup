@@ -15,6 +15,14 @@ Every command runs on Termux's background `app-shell` runner, so Termux is never
 brought to the front: the screen you are on stays up and each command's output is
 printed on the page that started it.
 
+That output is live and it looks like Termux. The command runs under a pseudo
+terminal (`script`, when Termux has it), so apt draws its progress bar and colours
+programs emit are really produced; the bytes are copied to the app over a
+loopback socket while the command runs, so the page fills as apt works rather
+than when it exits. The box on the page interprets them - `\r` rewrites its line,
+SGR becomes colour and bold, other escapes are dropped - so what you see is what
+the Termux window would show, not a wall of escape codes.
+
 "Uninstall opencode" opens a page instead of a dialog, because removing the
 package and deleting the user's data are very different outcomes. The page
 preselects **Keep my settings** (`~/.config/opencode` and

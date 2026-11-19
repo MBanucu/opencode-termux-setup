@@ -9,6 +9,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
@@ -16,6 +18,14 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 
 /**
  * A page of this app: a column of text, a monospace box for Termux output and a
@@ -43,6 +53,11 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private Button noticeAction;
     private TextView output;
     private Runnable pending;
+    private ScrollView outputScroll;
+    private Terminal terminal;
+    private volatile Live live;
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private boolean renderQueued;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,6 +85,12 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     protected void onPause() {
         RunCommandReceiver.setListener(null);
         super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        stopListening();
+        super.onDestroy();
     }
 
     // --- pieces of a page ----------------------------------------------------
@@ -118,20 +139,31 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         return params;
     }
 
-    /** The monospace box this page prints Termux output into. */
+    /**
+     * The terminal this page prints Termux output into: dark, monospace, and a
+     * fixed height, so a long install scrolls inside it instead of pushing the
+     * page around while it fills up.
+     */
     protected TextView outputBox() {
         if (output == null) {
+            terminal = new Terminal();
+
             output = new TextView(this);
+            output.setId(R.id.output);
             output.setTypeface(Typeface.MONOSPACE);
-            output.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            output.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            output.setTextColor(0xFFDCDCDC);
             output.setTextIsSelectable(true);
-            output.setPadding(dp(12), dp(12), dp(12), dp(12));
-            output.setBackgroundColor(0xFFF0F0F0);
-            output.setVisibility(View.GONE);
+            output.setPadding(dp(10), dp(10), dp(10), dp(10));
+
+            outputScroll = new ScrollView(this);
+            outputScroll.setBackgroundColor(0xFF101418);
+            outputScroll.addView(output);
+            outputScroll.setVisibility(View.GONE);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(280));
             params.topMargin = dp(12);
-            column.addView(output, params);
+            column.addView(outputScroll, params);
         }
         return output;
     }
@@ -213,10 +245,16 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     }
 
     private void send(String command, String label, String description) {
+        Live opened = listen();
         try {
-            TermuxCommands.send(this, command, label, description);
+            TermuxCommands.send(this, command, label, description,
+                    opened == null ? 0 : opened.port());
             clearNotice();
+            if (opened != null) {
+                startOutput();
+            }
         } catch (RuntimeException refused) {
+            stopListening();
             Log.w(TAG, "Termux refused the command", refused);
             copy(TermuxCommands.ALLOW_EXTERNAL_APPS);
             notice(getString(R.string.permission_title) + "\n\n"
@@ -229,9 +267,15 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     @Override
     public void onCommandResult(String text) {
         Log.i(TAG, "result: " + text.replace("\n", " | "));
+        stopListening();
         TextView box = outputBox();
-        box.setText(text);
-        box.setVisibility(View.VISIBLE);
+        synchronized (terminal) {
+            terminal.reset();
+            terminal.append(text);
+            box.setText(terminal.render());
+        }
+        outputScroll.setVisibility(View.VISIBLE);
+        outputScroll.fullScroll(View.FOCUS_DOWN);
     }
 
     // --- helpers -------------------------------------------------------------
@@ -245,6 +289,103 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard != null) {
             clipboard.setPrimaryClip(ClipData.newPlainText("opencode-setup", text));
+        }
+    }
+
+    // --- live output --------------------------------------------------------
+
+    /** The loopback port Termux writes a running command's output to. */
+    private static final class Live {
+        final ServerSocket socket;
+
+        Live(ServerSocket socket) {
+            this.socket = socket;
+        }
+
+        int port() {
+            return socket.getLocalPort();
+        }
+    }
+
+    /**
+     * Opens a loopback port before the command is sent. Termux copies the PTY's
+     * output into it as the command produces it, which is what makes the box
+     * fill while apt is still working instead of only when it exits.
+     */
+    private Live listen() {
+        stopListening();
+        try {
+            // 127.0.0.1 by name: getLoopbackAddress() may hand back ::1, and
+            // Termux's bash connects to the IPv4 literal below.
+            Live opened = new Live(
+                    new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")));
+            live = opened;
+            Thread pump = new Thread(() -> pump(opened), "termux-output");
+            pump.setDaemon(true);
+            pump.start();
+            return opened;
+        } catch (IOException noPort) {
+            // No port means no live output; the result bundle still arrives.
+            Log.w(TAG, "could not open a local port for live output", noPort);
+            return null;
+        }
+    }
+
+    private void pump(Live opened) {
+        try (Socket connection = opened.socket.accept()) {
+            Reader reader = new InputStreamReader(connection.getInputStream(),
+                    StandardCharsets.UTF_8);
+            char[] buffer = new char[4096];
+            int read;
+            while (live == opened && (read = reader.read(buffer)) >= 0) {
+                synchronized (terminal) {
+                    terminal.append(new String(buffer, 0, read));
+                }
+                scheduleRender();
+            }
+        } catch (IOException done) {
+            // The command exited or the page went away; the result follows.
+        }
+    }
+
+    /** Redraws at most every 120 ms: a PTY can emit progress faster than a screen. */
+    private void scheduleRender() {
+        if (renderQueued) {
+            return;
+        }
+        renderQueued = true;
+        ui.postDelayed(() -> {
+            renderQueued = false;
+            if (output == null) {
+                return;
+            }
+            synchronized (terminal) {
+                output.setText(terminal.render());
+            }
+            outputScroll.fullScroll(View.FOCUS_DOWN);
+        }, 120);
+    }
+
+    private void startOutput() {
+        TextView box = outputBox();
+        synchronized (terminal) {
+            terminal.reset();
+            box.setText(R.string.output_waiting);
+        }
+        outputScroll.setVisibility(View.VISIBLE);
+        outputScroll.fullScroll(View.FOCUS_DOWN);
+    }
+
+    private void stopListening() {
+        Live opened = live;
+        live = null;
+        if (opened == null) {
+            return;
+        }
+        try {
+            opened.socket.close();
+        } catch (IOException ignored) {
+            // Already closed.
         }
     }
 

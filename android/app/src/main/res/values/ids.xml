@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The terminal box, named so the end-to-end test can read what the page
+         shows while a command is still running. -->
+    <item name="output" type="id" />
+</resources>
