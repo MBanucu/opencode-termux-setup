@@ -26,6 +26,8 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -436,6 +438,14 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         WebView box = outputBox();
         script("resetTerm()");
         String waiting = getString(R.string.output_waiting);
+        File dir = getExternalFilesDir(null);
+        if (dir != null) {
+            try (FileOutputStream out = new FileOutputStream(new File(dir, "live-output.txt"))) {
+                out.write(waiting.getBytes(StandardCharsets.UTF_8));
+            } catch (IOException unwritable) {
+                Log.w(TAG, "could not reset the live output file", unwritable);
+            }
+        }
         script("waitingB64('" + Base64.encodeToString(
                 waiting.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP) + "')");
         reveal(box);
@@ -454,10 +464,24 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         }
     }
 
-    /** Carries the emulator's screen text back out of the WebView. */
+    /**
+     * Publishes the text the terminal is showing: to the accessibility tree for
+     * a screen reader, and to {@code live-output.txt} for adb. The file is also
+     * what the end-to-end test reads, because a terminal that repaints while a
+     * command runs does not always give UI Automator a node to read.
+     */
     private final class Screen {
         @JavascriptInterface
         public void onScreen(String text) {
+            File dir = getExternalFilesDir(null);
+            if (dir != null) {
+                File file = new File(dir, "live-output.txt");
+                try (FileOutputStream out = new FileOutputStream(file)) {
+                    out.write(text.getBytes(StandardCharsets.UTF_8));
+                } catch (IOException unwritable) {
+                    Log.w(TAG, "could not write live output", unwritable);
+                }
+            }
             ui.post(() -> {
                 if (output != null) {
                     output.setContentDescription(text);

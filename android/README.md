@@ -123,6 +123,14 @@ adb shell cat /sdcard/Android/data/io.github.mbanucu.opencodesetup/files/last-re
 adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity -e command uninstall --ez purge true
 ```
 
+While a command runs, the page also rewrites `live-output.txt` in the same
+directory with the text the terminal is showing, so a script can follow progress
+instead of waiting for the answer:
+
+```bash
+adb shell cat /sdcard/Android/data/io.github.mbanucu.opencodesetup/files/live-output.txt
+```
+
 It is an activity rather than a broadcast receiver because starting a service in
 another app from a background receiver is refused on modern Android, so the
 dispatch has to happen while this app is in the foreground. `command` takes

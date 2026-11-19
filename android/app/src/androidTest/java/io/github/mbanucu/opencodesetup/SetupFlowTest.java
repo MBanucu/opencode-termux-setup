@@ -315,23 +315,25 @@ public final class SetupFlowTest {
     }
 
     /**
-     * The terminal box once it holds real output that is not the final answer
-     * yet. This is what makes the run streamed: the text appears while Termux
-     * is still working, not in one block when it exits.
+     * The output the page is showing while Termux is still working.
+     *
+     * <p>Read from {@code live-output.txt}, which the page rewrites with exactly
+     * the text xterm.js is displaying. The terminal repaints continuously during
+     * an install, and UI Automator does not reliably hand back the WebView node
+     * while that happens, so the page's own copy of the screen is what this
+     * looks at; the same text is also its accessibility description.
      */
-    private String streamingText() {
+    private String streamingText() throws Exception {
+        File live = new File(InstrumentationRegistry.getInstrumentation()
+                .getTargetContext().getExternalFilesDir(null), "live-output.txt");
         long deadline = System.currentTimeMillis() + POLL;
         while (System.currentTimeMillis() < deadline) {
-            UiObject2 box = device.findObject(By.res(PACKAGE, "output"));
-            if (box != null) {
-                // The box is a WebView running xterm.js, so its screen text is
-                // published as the node's content description.
-                String text = box.getContentDescription();
-                if (text != null && !text.trim().isEmpty()
-                        && !text.startsWith(WAITING) && !text.contains("exit code")) {
-                    return text;
-                }
+            String text = read(live);
+            if (text != null && !text.trim().isEmpty()
+                    && !text.startsWith(WAITING) && !text.contains("exit code")) {
+                return text;
             }
+            Thread.sleep(250);
         }
         return null;
     }
