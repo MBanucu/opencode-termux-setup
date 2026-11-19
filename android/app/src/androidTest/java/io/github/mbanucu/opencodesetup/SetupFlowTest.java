@@ -112,7 +112,9 @@ public final class SetupFlowTest {
     @Before
     public void openApp() throws Exception {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
-        bringToFront();
+        try (TestMilestones.Step ignored = TestMilestones.step("open the app")) {
+            bringToFront();
+        }
     }
 
     @Test
@@ -220,9 +222,11 @@ public final class SetupFlowTest {
         if (present == null || !CHECK_INSTALLED.matcher(present.trim()).matches()) {
             installThroughThePage();
         }
-        device.findObject(By.text("Uninstall opencode")).click();
-        assertTrue("the uninstall page opens",
-                device.wait(Until.hasObject(By.text("Remove opencode?")), SHORT));
+        try (TestMilestones.Step ignored = TestMilestones.step("open the uninstall page")) {
+            device.findObject(By.text("Uninstall opencode")).click();
+            assertTrue("the uninstall page opens",
+                    device.wait(Until.hasObject(By.text("Remove opencode?")), SHORT));
+        }
 
         UiObject2 remove = device.wait(Until.findObject(By.text("Remove opencode")), SHORT);
         assertNotNull("the page offers the action", remove);
@@ -238,7 +242,8 @@ public final class SetupFlowTest {
         milestone("uninstall-started");
         // A still screen from here to the end of the block is the filesystem
         // working, not the app hesitating: the harness reports it as work.
-        try (TestMilestones.Busy ignored = TestMilestones.busy("uninstall")) {
+        try (TestMilestones.Busy busy = TestMilestones.busy("uninstall");
+             TestMilestones.Step ignored = TestMilestones.step("uninstall command")) {
             assertStreamed(mark,
                     "the page shows Termux's output while the removal is still running");
             // Ask only once the removal is over: a check sent while it runs answers
@@ -246,7 +251,10 @@ public final class SetupFlowTest {
             waitForResult(mark, STALL);
         }
 
-        String report = checkUntil(CHECK_REMOVED, 60_000);
+        String report;
+        try (TestMilestones.Step ignored = TestMilestones.step("check that it is gone")) {
+            report = checkUntil(CHECK_REMOVED, 60_000);
+        }
         assertTrue("the check that reported the removal ran in the app: " + report,
                 device.hasObject(By.pkg(PACKAGE)));
         milestone("uninstalled");
@@ -276,9 +284,11 @@ public final class SetupFlowTest {
         if (install == null) {
             fail("the install action is not on screen: " + diagnosis());
         }
-        install.click();
-        assertTrue("the install page opens",
-                device.wait(Until.hasObject(By.text("Download about 70 MB?")), SHORT));
+        try (TestMilestones.Step ignored = TestMilestones.step("open the install page")) {
+            install.click();
+            assertTrue("the install page opens",
+                    device.wait(Until.hasObject(By.text("Download about 70 MB?")), SHORT));
+        }
 
         UiObject2 accept = device.wait(
                 Until.findObject(By.text(Pattern.compile("(?i)^start setup$"))), SHORT);
@@ -291,13 +301,17 @@ public final class SetupFlowTest {
         assertFalse("the Termux window was not brought forward",
                 device.hasObject(By.pkg(TERMUX)));
         milestone("install-started");
-        try (TestMilestones.Busy ignored = TestMilestones.busy("install")) {
+        try (TestMilestones.Busy busy = TestMilestones.busy("install");
+             TestMilestones.Step ignored = TestMilestones.step("install command")) {
             assertStreamed(mark,
                     "the page shows the install as it happens, not only at the end");
             waitForResult(mark, STALL);
         }
 
-        String report = checkUntil(CHECK_INSTALLED, 60_000);
+        String report;
+        try (TestMilestones.Step ignored = TestMilestones.step("check that it is installed")) {
+            report = checkUntil(CHECK_INSTALLED, 60_000);
+        }
         assertTrue("the check that reported the version ran in the app: " + report,
                 device.hasObject(By.pkg(PACKAGE)));
         milestone("installed");
@@ -554,7 +568,9 @@ public final class SetupFlowTest {
         long deadline = System.currentTimeMillis() + budget;
         String report = null;
         while (System.currentTimeMillis() < deadline) {
-            report = checkOnce();
+            try (TestMilestones.Step ignored = TestMilestones.step("check round trip")) {
+                report = checkOnce();
+            }
             if (report != null && wanted.matcher(report.trim()).matches()) {
                 return report;
             }
