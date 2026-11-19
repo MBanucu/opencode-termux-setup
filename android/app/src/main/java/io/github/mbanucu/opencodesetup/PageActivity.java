@@ -494,6 +494,32 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     // --- running a command ---------------------------------------------------
 
     /**
+     * Writes base64 PTY bytes straight into the terminal, for the rendering
+     * tests. A terminal interprets a carriage return, an erase or a colour
+     * instead of printing it, so the only honest way to test that is to hand it
+     * the bytes and read the screen it publishes afterwards.
+     */
+    protected void writeProbeToTerminal(String base64Bytes) {
+        outputBox();
+        showTerminalFrame();
+        write(new String(Base64.decode(base64Bytes, Base64.NO_WRAP), StandardCharsets.UTF_8));
+        if (terminalFrame != null) {
+            terminalFrame.post(() -> script("fitNow()"));
+        }
+    }
+
+    /** Shows the terminal and its copy button without waiting for a result. */
+    private void showTerminalFrame() {
+        if (terminalFrame != null) {
+            terminalFrame.setVisibility(View.VISIBLE);
+        }
+        if (copyButton != null) {
+            copyButton.setVisibility(View.VISIBLE);
+            copyButton.setEnabled(true);
+        }
+    }
+
+    /**
      * Asks for Termux's RUN_COMMAND permission without sending anything, so the
      * request can happen on the page that explains it instead of in the middle of
      * the first command.

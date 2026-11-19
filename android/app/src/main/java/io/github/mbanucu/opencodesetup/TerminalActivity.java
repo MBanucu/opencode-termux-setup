@@ -22,6 +22,9 @@ public final class TerminalActivity extends PageActivity {
     private static final String EXTRA_DESCRIPTION = "terminal_description";
     private static final String EXTRA_TITLE = "terminal_title";
 
+    /** Raw PTY bytes for the rendering tests; when set, nothing is run. */
+    static final String EXTRA_PROBE = "pty_probe_b64";
+
     /** Opens a page that runs {@code command} as soon as it appears. */
     static void start(Context from, String command, String label, String description,
             CharSequence title) {
@@ -44,15 +47,24 @@ public final class TerminalActivity extends PageActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        String command = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_COMMAND);
-        if (command == null) {
+        Intent opener = getIntent();
+        String command = opener == null ? null : opener.getStringExtra(EXTRA_COMMAND);
+        String probe = opener == null ? null : opener.getStringExtra(EXTRA_PROBE);
+        if (command == null && probe == null) {
             finish();
             return;
         }
-        CharSequence title = getIntent().getCharSequenceExtra(EXTRA_TITLE);
+        CharSequence title = opener.getCharSequenceExtra(EXTRA_TITLE);
         terminalPage(title == null ? getString(R.string.app_name) : title);
 
-        int filler = getIntent().getIntExtra("filler_lines", 0);
+        if (probe != null) {
+            // A rendering test hand-writes the bytes; the terminal is what has to
+            // interpret them, so there is nothing here to run.
+            writeProbeToTerminal(probe);
+            return;
+        }
+
+        int filler = opener.getIntExtra("filler_lines", 0);
         if (filler > 0) {
             // A test asked for a full terminal: a two line command would clear
             // what it wrote, so nothing is run here.
@@ -60,7 +72,7 @@ public final class TerminalActivity extends PageActivity {
             return;
         }
         runCommand(command,
-                String.valueOf(getIntent().getStringExtra(EXTRA_LABEL)),
-                String.valueOf(getIntent().getStringExtra(EXTRA_DESCRIPTION)));
+                String.valueOf(opener.getStringExtra(EXTRA_LABEL)),
+                String.valueOf(opener.getStringExtra(EXTRA_DESCRIPTION)));
     }
 }
