@@ -2,12 +2,15 @@
 // hosted CI runners, which fails the build on artifacts that plainly exist.
 // Google's mirror of Maven Central is the same content from a different edge;
 // mavenCentral() stays as the fallback.
-val centralMirror = "https://maven-central.storage-download.googleapis.com/maven2/"
-
+//
+// pluginManagement must stay the first block in this file, so the mirror URL is
+// written out rather than hoisted into a val above it.
 pluginManagement {
     repositories {
         google()
-        maven(centralMirror) { name = "MavenCentralMirror" }
+        maven("https://maven-central.storage-download.googleapis.com/maven2/") {
+            name = "MavenCentralMirror"
+        }
         mavenCentral()
         gradlePluginPortal()
     }
@@ -16,7 +19,9 @@ pluginManagement {
 dependencyResolutionManagement {
     repositories {
         google()
-        maven(centralMirror) { name = "MavenCentralMirror" }
+        maven("https://maven-central.storage-download.googleapis.com/maven2/") {
+            name = "MavenCentralMirror"
+        }
         mavenCentral()
     }
 }
