@@ -59,6 +59,18 @@ public final class SetupFlowTest {
     /** A reinstall downloads ~70 MB, so it gets a download-sized budget. */
     private static final long INSTALL_BUDGET = 900_000;
 
+    /**
+     * What "Check setup" prints, and nothing else. Matching the whole result is
+     * deliberate: Termux also delivers the output of the visible install and
+     * uninstall commands to this app, and install.sh ends by printing a version
+     * line of its own, so a loose {@code contains("opencode v")} could pass on
+     * the installer's log instead of on a check run afterwards.
+     */
+    private static final Pattern CHECK_REMOVED =
+            Pattern.compile("(?s)^opencode is not installed\\n+\\nexit code 0$");
+    private static final Pattern CHECK_INSTALLED =
+            Pattern.compile("(?s)^opencode v\\S+\\n+\\nexit code 0$");
+
     private UiDevice device;
 
     @Before
@@ -156,11 +168,12 @@ public final class SetupFlowTest {
                 device.wait(Until.hasObject(By.pkg(TERMUX)), LONG));
         shot("04-uninstall-running.png");
 
-        String report = checkUntil("opencode is not installed", UNINSTALL_BUDGET);
+        String report = checkUntil(CHECK_REMOVED, UNINSTALL_BUDGET);
         assertTrue("the check that reported the removal ran in the app",
                 device.hasObject(By.pkg(PACKAGE)));
         shot("05-uninstalled.png");
-        assertTrue("nothing was left running: " + report, report.contains("exit code"));
+        assertTrue("the removal was reported before the install ran: " + report,
+                report.startsWith("opencode is not installed"));
     }
 
     /**
@@ -185,9 +198,9 @@ public final class SetupFlowTest {
                 device.wait(Until.hasObject(By.pkg(TERMUX)), LONG));
         shot("06-install-running.png");
 
-        String report = checkUntil("opencode v", INSTALL_BUDGET);
-        assertTrue("the install left a runnable binary: " + report,
-                report.contains("exit code 0"));
+        String report = checkUntil(CHECK_INSTALLED, INSTALL_BUDGET);
+        assertTrue("the check that reported the version ran in the app: " + report,
+                device.hasObject(By.pkg(PACKAGE)));
         shot("07-installed.png");
     }
 
@@ -231,16 +244,16 @@ public final class SetupFlowTest {
      * with the old version while the install is still downloading - so the only
      * honest signal is a check that has already started after the work finished.
      */
-    private String checkUntil(String needle, long budget) throws Exception {
+    private String checkUntil(Pattern wanted, long budget) throws Exception {
         long deadline = System.currentTimeMillis() + budget;
         String report = null;
         while (System.currentTimeMillis() < deadline) {
             report = checkOnce();
-            if (report != null && report.contains(needle)) {
+            if (report != null && wanted.matcher(report.trim()).matches()) {
                 return report;
             }
         }
-        fail("Termux never reported '" + needle + "' within " + (budget / 1000)
+        fail("Termux never answered " + wanted + " within " + (budget / 1000)
                 + "s; the last answer was: " + report);
         return report;
     }

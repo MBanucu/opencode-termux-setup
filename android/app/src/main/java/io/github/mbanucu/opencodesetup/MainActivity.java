@@ -244,8 +244,9 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
         intent.putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_BASH);
         intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-lc", command});
         intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", TERMUX_HOME);
-        // Only a background command reports its output back through the
-        // PendingIntent; a visible one runs in the Termux window instead.
+        // A background command reports its output through the PendingIntent; a
+        // visible one runs in the Termux window, and this Termux also delivers
+        // its output when it finishes, so the app shows whatever arrives.
         // Current Termux picks the runner; the boolean is the older spelling of
         // the same choice and is still honoured as a fallback.
         intent.putExtra("com.termux.RUN_COMMAND_RUNNER",
