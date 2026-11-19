@@ -11,7 +11,7 @@ Both records are open:
 
 | record | URL | state |
 | --- | --- | --- |
-| metadata merge request | <https://gitlab.com/fdroid/fdroiddata/-/merge_requests/58147> | open, awaiting review |
+| metadata merge request | <https://gitlab.com/fdroid/fdroiddata/-/merge_requests/58147> | open, pipeline green (`fdroid build`, `check apk`) |
 | packaging request (RFP) | <https://gitlab.com/fdroid/rfp/-/work_items/4830> | open |
 
 Filed with `glab` on this device (authenticated as `MBanucu`). The fork
