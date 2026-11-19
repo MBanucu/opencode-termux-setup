@@ -42,6 +42,13 @@ commits API.
   `CI_ENABLE_MERGE_REQUEST_PIPELINES` is not `false`, and pipelines from forks
   have to be permitted on the parent project, so the first pipeline is started
   from the merge request page — that part is the maintainer's side.
+- The 403 is **not** an expired or under-scoped token. This `glab` session holds an
+  OAuth token rather than a PAT (`GET /personal_access_tokens/self` answers
+  `400 … requires token type to be a personal access token`) and its `api` scope
+  works: it reads `fdroid/fdroiddata`, pushes to its own fork, creates issues in
+  `fdroid/rfp`, and `PUT`s the merge request. No scope setting removes the 403;
+  what would is membership of the parent project, which is the maintainers'
+  call.
 
 ## Opening the next one by hand
 
