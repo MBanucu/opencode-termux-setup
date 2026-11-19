@@ -156,6 +156,11 @@ public final class SetupFlowTest {
         purge.click();
         assertTrue("deleting everything changes the command",
                 device.wait(Until.hasObject(By.textContains("--purge")), SHORT));
+        // Re-read the nodes: a cached UiObject2 would answer for the old state.
+        assertTrue("the destructive choice is selected",
+                device.findObject(By.text("Remove everything")).isChecked());
+        assertFalse("the safe choice is deselected, not left on as well",
+                device.findObject(By.text("Keep my settings")).isChecked());
         UiObject2 purgeDetail = device.findObject(By.textContains("connected again"));
         assertNotNull("the destructive choice says what it destroys", purgeDetail);
         shot("04-purge-option.png");

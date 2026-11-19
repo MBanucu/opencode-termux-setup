@@ -111,10 +111,13 @@ public final class UninstallActivity extends Activity {
     private RadioButton option(RadioGroup group, int label, boolean checked) {
         RadioButton button = new RadioButton(this);
         button.setText(label);
-        button.setChecked(checked);
         button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         button.setPadding(0, dp(8), 0, dp(2));
         group.addView(button);
+        // Checked only after it joins the group: a button checked before being
+        // added never becomes the group's checked id, so selecting the other
+        // option left both of them on and the command never changed.
+        button.setChecked(checked);
         return button;
     }
 
