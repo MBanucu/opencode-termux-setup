@@ -8,18 +8,18 @@ import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
  * A small terminal for the output of a command run under a pseudo terminal.
  *
- * <p>Under a PTY a command behaves as it does in the Termux window: apt draws
- * its progress percentage by returning the carriage to the start of the line,
- * errors arrive in colour, and every line ends in {@code \r\n}. Writing those
- * bytes straight into a TextView would show the escape codes and one line per
- * progress update, so they are interpreted here: {@code \r} rewrites the line,
- * {@code \b} deletes, tabs expand, SGR sets colour and bold, and every other
- * escape sequence is dropped instead of printed.
+ * <p>Under a PTY a command behaves as it does in the Termux window: apt rewrites
+ * a progress line by returning the carriage to column 0, errors arrive in
+ * colour, and lines end in {@code \r\n}. Those bytes cannot be printed as they
+ * are, so they are interpreted the way a terminal would: {@code \r} moves the
+ * cursor back to column 0 and the next characters overwrite the line, {@code \b}
+ * deletes, tabs advance, SGR sets colour and bold, and other escapes are dropped.
  */
 final class Terminal {
 
@@ -32,23 +32,41 @@ final class Terminal {
             0xFF7F7F7F, 0xFFE88B8B, 0xFFB5E890, 0xFFF0D197,
             0xFF82C7FF, 0xFFD79AE8, 0xFF7FD6DF, 0xFFFFFFFF,
     };
+    private static final int[] CUBE = {0, 95, 135, 175, 215, 255};
 
     /** A long install prints a lot; the oldest lines go first. */
     private static final int MAX_LINES = 3000;
 
-    private static final int[] CUBE = {0, 95, 135, 175, 215, 255};
+    /** One row: the characters written to it and the style each was written in. */
+    private static final class Row {
+        char[] text = new char[120];
+        int[] colour = new int[120];
+        boolean[] bold = new boolean[120];
+        int length;
 
-    private final List<SpannableStringBuilder> lines = new ArrayList<>();
+        void put(int column, char c, int colour, boolean bold) {
+            if (column >= text.length) {
+                int size = Math.max(column + 1, text.length * 2);
+                text = Arrays.copyOf(text, size);
+                this.colour = Arrays.copyOf(this.colour, size);
+                this.bold = Arrays.copyOf(this.bold, size);
+            }
+            text[column] = c;
+            this.colour[column] = colour;
+            this.bold[column] = bold;
+            if (column + 1 > length) {
+                length = column + 1;
+            }
+        }
+    }
+
+    private final List<Row> rows = new ArrayList<>();
     private final StringBuilder parameters = new StringBuilder();
 
     private int current;
+    private int cursor;
     private int colour;
     private boolean bold;
-
-    // The stretch of the current line that has not been given its colour yet.
-    private int runStart;
-    private int runColour;
-    private boolean runBold;
 
     private State state = State.TEXT;
 
@@ -60,19 +78,17 @@ final class Terminal {
 
     /** Forgets everything, like a terminal that was just opened. */
     void reset() {
-        lines.clear();
-        lines.add(new SpannableStringBuilder());
+        rows.clear();
+        rows.add(new Row());
         current = 0;
+        cursor = 0;
         colour = 0;
         bold = false;
-        runStart = 0;
-        runColour = 0;
-        runBold = false;
         state = State.TEXT;
         parameters.setLength(0);
     }
 
-    /** Feeds exactly what the PTY wrote; escape sequences are interpreted. */
+    /** Feeds exactly what the PTY wrote; the escapes are interpreted. */
     void append(String chunk) {
         for (int i = 0; i < chunk.length(); i++) {
             feed(chunk.charAt(i));
@@ -81,13 +97,32 @@ final class Terminal {
 
     /** The screen as it would look: colours kept as spans, cursor position applied. */
     CharSequence render() {
-        closeRun();
         SpannableStringBuilder all = new SpannableStringBuilder();
-        for (int i = 0; i < lines.size(); i++) {
+        for (int i = 0; i < rows.size(); i++) {
             if (i > 0) {
                 all.append('\n');
             }
-            all.append(lines.get(i));
+            Row row = rows.get(i);
+            int start = all.length();
+            all.append(new String(row.text, 0, row.length));
+            int run = 0;
+            for (int column = 1; column <= row.length; column++) {
+                boolean ends = column == row.length
+                        || row.colour[column] != row.colour[run]
+                        || row.bold[column] != row.bold[run];
+                if (!ends) {
+                    continue;
+                }
+                if (row.colour[run] != 0) {
+                    all.setSpan(new ForegroundColorSpan(row.colour[run]), start + run,
+                            start + column, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+                if (row.bold[run]) {
+                    all.setSpan(new StyleSpan(Typeface.BOLD), start + run, start + column,
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+                run = column;
+            }
         }
         return all;
     }
@@ -101,11 +136,11 @@ final class Terminal {
                 } else if (c == ']') {
                     state = State.OSC;
                 } else {
-                    state = State.TEXT;          // a two-byte escape: nothing to show
+                    state = State.TEXT;              // a two-byte escape: nothing to show
                 }
                 return;
             case SEQUENCE:
-                if (c >= 0x40 && c <= 0x7e) {    // final byte of a CSI sequence
+                if (c >= 0x40 && c <= 0x7e) {        // final byte of a CSI sequence
                     if (c == 'm') {
                         sgr(parameters);
                     }
@@ -117,7 +152,7 @@ final class Terminal {
                 return;
             case OSC:
                 if (c == '\u0007') {
-                    state = State.TEXT;          // window title and the like
+                    state = State.TEXT;              // window title and the like
                 } else if (c == '\u001b') {
                     state = State.OSC_ESCAPE;
                 }
@@ -136,78 +171,43 @@ final class Terminal {
                 state = State.ESCAPE;
                 return;
             case '\r':
-                // Carriage return: the line is redrawn from column 0. That is
-                // how apt moves "45%" to "46%" without printing a new line.
-                closeRun();
-                line().clear();
-                runStart = 0;
-                runColour = colour;
-                runBold = bold;
+                // Column 0, as a terminal does. The line is not erased here: the
+                // characters that follow overwrite it, which is how apt turns
+                // "45%" into "46%" and why the "\r" of "\r\n" costs nothing.
+                cursor = 0;
                 return;
             case '\n':
-                closeRun();
-                newLine();
+                current++;
+                cursor = 0;
+                if (current == rows.size()) {
+                    rows.add(new Row());
+                    if (rows.size() > MAX_LINES) {
+                        rows.remove(0);
+                        current--;
+                    }
+                }
                 return;
             case '\b':
-                closeRun();
-                if (line().length() > 0) {
-                    line().delete(line().length() - 1, line().length());
+                if (cursor > 0) {
+                    cursor--;
                 }
-                runStart = line().length();
                 return;
             case '\t':
-                closeRun();
-                for (int i = 8 - line().length() % 8; i > 0; i--) {
-                    line().append(' ');
+                int target = cursor + 8 - cursor % 8;
+                while (cursor < target) {
+                    row().put(cursor++, ' ', colour, bold);
                 }
-                runStart = line().length();
                 return;
             default:
                 if (c < 0x20 || c == 0x7f) {
                     return;
                 }
-                if (colour != runColour || bold != runBold) {
-                    closeRun();
-                }
-                line().append(c);
+                row().put(cursor++, c, colour, bold);
         }
     }
 
-    private void newLine() {
-        current++;
-        if (current == lines.size()) {
-            lines.add(new SpannableStringBuilder());
-            if (lines.size() > MAX_LINES) {
-                lines.remove(0);
-                current--;
-            }
-        }
-        runStart = 0;
-        runColour = colour;
-        runBold = bold;
-    }
-
-    private SpannableStringBuilder line() {
-        return lines.get(current);
-    }
-
-    /** Gives the stretch written so far its colour, so spans stay per word. */
-    private void closeRun() {
-        SpannableStringBuilder line = line();
-        int end = line.length();
-        if (end > runStart) {
-            if (runColour != 0) {
-                line.setSpan(new ForegroundColorSpan(runColour), runStart, end,
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-            if (runBold) {
-                line.setSpan(new StyleSpan(Typeface.BOLD), runStart, end,
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-        }
-        runStart = end;
-        runColour = colour;
-        runBold = bold;
+    private Row row() {
+        return rows.get(current);
     }
 
     /** SGR: colour and bold, in the forms apt, curl and opencode actually send. */
@@ -235,12 +235,12 @@ final class Terminal {
                 colour = BRIGHT[code - 90];
             } else if ((code == 38 || code == 48) && i + 1 < parts.length) {
                 boolean foreground = code == 38;
-                int value = 0;
-                int next = number(parts[i + 1]);
-                if (next == 5 && i + 2 < parts.length) {
+                int value;
+                int kind = number(parts[i + 1]);
+                if (kind == 5 && i + 2 < parts.length) {
                     value = colour256(number(parts[i + 2]));
                     i += 2;
-                } else if (next == 2 && i + 4 < parts.length) {
+                } else if (kind == 2 && i + 4 < parts.length) {
                     value = Color.rgb(number(parts[i + 2]), number(parts[i + 3]),
                             number(parts[i + 4]));
                     i += 4;
