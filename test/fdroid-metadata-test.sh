@@ -44,8 +44,9 @@ application_id=$(sed -n 's/^ *applicationId = "\(.*\)"/\1/p' "$gradle" | head -1
 echo "version parity (build.gradle.kts vs recipe)"
 name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' "$gradle" | head -1)
 code=$(sed -n 's/^ *versionCode = \(.*\)/\1/p' "$gradle" | head -1)
-build_name=$(sed -n '/^Builds:/,/^[A-Z]/s/^ *versionName: \(.*\)/\1/p' "$yml" | head -1)
-build_code=$(sed -n '/^Builds:/,/^[A-Z]/s/^ *versionCode: \(.*\)/\1/p' "$yml" | head -1)
+# The first key of a Builds entry carries the YAML list dash: "- versionName:".
+build_name=$(sed -n '/^Builds:/,/^[A-Z]/s/^ *-* *versionName: \(.*\)/\1/p' "$yml" | head -1)
+build_code=$(sed -n '/^Builds:/,/^[A-Z]/s/^ *-* *versionCode: \(.*\)/\1/p' "$yml" | head -1)
 current_name=$(sed -n 's/^CurrentVersion: \(.*\)/\1/p' "$yml" | head -1)
 current_code=$(sed -n 's/^CurrentVersionCode: \(.*\)/\1/p' "$yml" | head -1)
 [ -n "$name" ] && [ "$build_name" = "$name" ] &&
