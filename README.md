@@ -28,7 +28,7 @@ bash install.sh
 
 ### Or tap a button (Android app)
 
-`android/` contains a small setup app in the same shape as the one in [freebuff-native](https://github.com/MBanucu/freebuff-native-termux): it bundles nothing, shows what will be downloaded, and hands the single command above to Termux through `RUN_COMMAND`. Install the APK from [Releases](../../releases/latest), tap **Install opencode**, and watch it run in the Termux window. **Uninstall opencode** opens a page where you choose whether to keep your credentials, sessions and settings or delete them along with the package and its APT repository.
+`android/` contains a small setup app in the same shape as the one in [freebuff-native](https://github.com/MBanucu/freebuff-native-termux): it bundles nothing, shows what will be downloaded, and hands the single command above to Termux through `RUN_COMMAND`. Install the APK from [Releases](../../releases/latest), tap **Install opencode**, and watch it run in the Termux window. **Uninstall opencode** opens a page where you choose whether to keep your credentials, sessions and settings or delete them along with the package and its APT repository. Both actions are pages rather than dialogs, and whichever one you start prints that command's output from Termux on the same page.
 
 It needs Termux's `allow-external-apps=true` in `~/.termux/termux.properties`; if Termux refuses the command, the app copies that line to the clipboard.
 

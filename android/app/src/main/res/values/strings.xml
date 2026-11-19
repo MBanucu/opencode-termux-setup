@@ -55,5 +55,4 @@ Add that line to ~/.termux/termux.properties inside Termux, then run termux-relo
     <string name="missing_positive">Open F-Droid</string>
     <string name="missing_negative">Close</string>
 
-    <string name="dialog_close">Close</string>
 </resources>

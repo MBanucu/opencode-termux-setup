@@ -53,9 +53,10 @@ public final class PermissionDeniedTest {
         assertNotNull("Android asks for Termux's permission before anything is sent", allow);
 
         device.pressBack();
+        // The explanation is printed on the page, not in a dialog.
         assertTrue("the app explains the denial instead of failing silently",
-                device.wait(Until.hasObject(By.text("Permission needed")), SHORT));
+                device.wait(Until.hasObject(By.textContains("Permission needed")), SHORT));
         assertTrue("the explanation points at the app settings",
-                device.hasObject(By.text(Pattern.compile("(?i)open settings"))));
+                device.hasObject(By.text(Pattern.compile("(?i)^open settings$"))));
     }
 }

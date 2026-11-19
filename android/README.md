@@ -37,7 +37,7 @@ the latest release.
 
 ## Constraints kept from the reference app
 
-- **No dependencies.** No AndroidX, no networking, no analytics — three small
+- **No dependencies.** No AndroidX, no networking, no analytics — four small
   activities plus one `BroadcastReceiver`, so `assembleDebug` needs only the SDK.
 - **One permission**, `com.termux.permission.RUN_COMMAND`, owned by Termux. It is
   requested at the moment of use, and a denial is explained instead of retried.
@@ -57,9 +57,10 @@ accessibility event stream: waits are `Until.hasObject` / `Until.findObject` /
 sleep, and the nodes a screen reader would see are what the tests match on. No
 assertion comes from a screenshot.
 
-- `SetupFlowTest` — the main screen offers four actions; each consent dialog
-  names its command and what it changes (sizes and repository for install), and
-  cancel closes it without a side effect; **the uninstall page** offers keeping
+- `SetupFlowTest` — the main screen offers four actions; the install and
+  uninstall pages name their command and what it changes (sizes and repository
+  for install), and cancel leaves them without a side effect; **the uninstall
+  page** offers keeping
   settings or deleting them, has keeping preselected, swaps the command to
   `--purge` when deleting is chosen, and sends nothing while being read;
   **Remove really removes**: it presses the page's action, waits for Termux's
@@ -122,7 +123,9 @@ install or removal in the Termux window.
 
 ```
 app/src/main/java/io/github/mbanucu/opencodesetup/
-  MainActivity.java       # programmatic UI, consent dialog, RUN_COMMAND handoff
+  PageActivity.java       # shared page: text, inline notice, Termux output box
+  MainActivity.java       # the four actions and the check output
+  InstallActivity.java    # consent page, prints the install output
   UninstallActivity.java  # keep-or-delete page, one command per choice
   AdbCommandActivity.java # the same actions for adb, answers through a file
   Commands.java           # the command strings, defined once
