@@ -3,6 +3,8 @@ package io.github.mbanucu.opencodesetup;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import android.content.Intent;
+
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.By;
@@ -44,7 +46,10 @@ public final class PermissionDeniedTest {
     public void openApp() throws Exception {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
         // No grant on purpose: this run tests what happens without it.
-        device.executeShellCommand("am start -W -n " + PACKAGE + "/.MainActivity");
+        InstrumentationRegistry.getInstrumentation().getTargetContext().startActivity(
+                new Intent(Intent.ACTION_MAIN)
+                        .setClassName(PACKAGE, PACKAGE + ".MainActivity")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         assertTrue("the app starts",
                 device.wait(Until.hasObject(By.text("Check setup")), 20_000));
     }

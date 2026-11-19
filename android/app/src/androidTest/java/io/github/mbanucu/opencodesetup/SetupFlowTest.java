@@ -5,6 +5,8 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import android.content.Intent;
+
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.By;
@@ -25,6 +27,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -222,7 +226,7 @@ public final class SetupFlowTest {
 
         UiObject2 remove = device.wait(Until.findObject(By.text("Remove opencode")), SHORT);
         assertNotNull("the page offers the action", remove);
-        device.executeShellCommand("logcat -c");
+        long mark = eventsMark();
         remove.click();
 
         // Nothing may be raised over this app: the command runs in Termux's
@@ -235,10 +239,11 @@ public final class SetupFlowTest {
         // A still screen from here to the end of the block is the filesystem
         // working, not the app hesitating: the harness reports it as work.
         try (TestMilestones.Busy ignored = TestMilestones.busy("uninstall")) {
-            assertStreamed("the page shows Termux's output while the removal is still running");
+            assertStreamed(mark,
+                    "the page shows Termux's output while the removal is still running");
             // Ask only once the removal is over: a check sent while it runs answers
             // with the old state, and the two results race in last-result.txt.
-            waitForResult(STALL);
+            waitForResult(mark, STALL);
         }
 
         String report = checkUntil(CHECK_REMOVED, 60_000);
@@ -278,7 +283,7 @@ public final class SetupFlowTest {
         UiObject2 accept = device.wait(
                 Until.findObject(By.text(Pattern.compile("(?i)^start setup$"))), SHORT);
         assertNotNull("the page offers to start the setup", accept);
-        device.executeShellCommand("logcat -c");
+        long mark = eventsMark();
         accept.click();
 
         assertTrue("the app stays in front",
@@ -287,8 +292,9 @@ public final class SetupFlowTest {
                 device.hasObject(By.pkg(TERMUX)));
         milestone("install-started");
         try (TestMilestones.Busy ignored = TestMilestones.busy("install")) {
-            assertStreamed("the page shows the install as it happens, not only at the end");
-            waitForResult(STALL);
+            assertStreamed(mark,
+                    "the page shows the install as it happens, not only at the end");
+            waitForResult(mark, STALL);
         }
 
         String report = checkUntil(CHECK_INSTALLED, 60_000);
@@ -336,7 +342,14 @@ public final class SetupFlowTest {
      * task forward, so the page never changes.
      */
     private void bringToFront() throws Exception {
-        device.executeShellCommand("am start -W -f 0x10008000 -n " + PACKAGE + "/.MainActivity");
+        // Started in-process, not through a shell: the flags say close the task
+        // and start the main page fresh, and no command needs to be parsed for
+        // that to happen.
+        InstrumentationRegistry.getInstrumentation().getTargetContext().startActivity(
+                new Intent(Intent.ACTION_MAIN)
+                        .setClassName(PACKAGE, PACKAGE + ".MainActivity")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         scrollToTop();
         assertTrue("the app is in the foreground, with its actions in view: " + diagnosis(),
                 device.wait(Until.hasObject(By.text("Check setup")), SHORT));
@@ -366,8 +379,8 @@ public final class SetupFlowTest {
     }
 
     /** Fails at the moment output should have started, quoting what happened. */
-    private void assertStreamed(String message) throws Exception {
-        if (streamingText() == null) {
+    private void assertStreamed(long mark, String message) throws Exception {
+        if (streamingText(mark) == null) {
             fail(message + " - no live chunk in " + (STREAM / 1000) + "s. " + diagnosis());
         }
     }
@@ -389,9 +402,15 @@ public final class SetupFlowTest {
     }
 
     /** The last events the app recorded, on one line whose wording is greppable. */
-    private String logTail() throws Exception {
-        return device.executeShellCommand("logcat -d -s OpencodeSetup:I | tail -12")
-                .replace("\n", " ; ").trim();
+    private String logTail() {
+        String[] lines = eventsSince(0).split("\n");
+        StringBuilder tail = new StringBuilder();
+        for (int i = Math.max(0, lines.length - 12); i < lines.length; i++) {
+            if (!lines[i].trim().isEmpty()) {
+                tail.append(tail.length() == 0 ? "" : " ; ").append(lines[i].trim());
+            }
+        }
+        return tail.toString();
     }
 
     /**
@@ -400,18 +419,18 @@ public final class SetupFlowTest {
      * <p>The app logs one {@code stream:<bytes>} line per chunk it hands to the
      * terminal. That is the only signal that survives the terminal repainting:
      * UI Automator does not reliably return a WebView node while it repaints.
-     * The log is cleared before the command starts, so a line here cannot come
-     * from an earlier run or from the final result.
+     * The log is read from the file the app writes itself, from the position it
+     * had before the command started, so a line here cannot come from an earlier
+     * run or from the final result - and no shell round trip is spent asking.
      */
-    private String streamingText() throws Exception {
+    private String streamingText(long mark) throws Exception {
         long deadline = System.currentTimeMillis() + STREAM;
         while (System.currentTimeMillis() < deadline) {
-            String log = device.executeShellCommand("logcat -d -s OpencodeSetup:I");
-            Matcher stream = Pattern.compile("stream:(\\d+)").matcher(log);
+            Matcher stream = Pattern.compile("stream:(\\d+)").matcher(eventsSince(mark));
             if (stream.find()) {
                 return "streamed " + stream.group(1) + " bytes while running";
             }
-            Thread.sleep(100);
+            Thread.sleep(50);
         }
         return null;
     }
@@ -466,6 +485,39 @@ public final class SetupFlowTest {
         return text;
     }
 
+    /** The app's own event log: the same lines logcat has, without a shell call. */
+    private File eventsFile() {
+        return new File(InstrumentationRegistry.getInstrumentation()
+                .getTargetContext().getExternalFilesDir(null), "events.log");
+    }
+
+    /** The log's length now: everything after it belongs to what happens next. */
+    private long eventsMark() {
+        return eventsFile().length();
+    }
+
+    /**
+     * What the app logged after {@code mark}.
+     *
+     * <p>Read straight from the file the app writes: one {@code logcat -d} per
+     * poll was a shell process per 250 ms, and the same lines were already here.
+     */
+    private String eventsSince(long mark) {
+        File file = eventsFile();
+        if (!file.isFile()) {
+            return "";
+        }
+        try (RandomAccessFile in = new RandomAccessFile(file, "r")) {
+            long start = Math.min(mark, in.length());
+            in.seek(start);
+            byte[] buffer = new byte[(int) (in.length() - start)];
+            in.readFully(buffer);
+            return new String(buffer, StandardCharsets.UTF_8);
+        } catch (IOException unreadable) {
+            return "";
+        }
+    }
+
     /** Where the result bundle of the last command is stored. */
     private File resultFile() {
         return new File(InstrumentationRegistry.getInstrumentation()
@@ -514,12 +566,12 @@ public final class SetupFlowTest {
      * still running answers with the state before it, and the installer's summary
      * and the check's answer overwrite each other in {@code last-result.txt}.
      */
-    private void waitForResult(long stall) throws Exception {
+    private void waitForResult(long mark, long stall) throws Exception {
         long lastProgress = System.currentTimeMillis();
         String seen = "";
         long bytes = 0;
         while (System.currentTimeMillis() - lastProgress < stall) {
-            String log = device.executeShellCommand("logcat -d -s OpencodeSetup:I");
+            String log = eventsSince(mark);
             if (log.contains("result: ")) {
                 return;
             }
@@ -538,7 +590,7 @@ public final class SetupFlowTest {
                     bytes += Long.parseLong(counted.group(1));
                 }
             }
-            Thread.sleep(250);
+            Thread.sleep(100);
         }
         fail("the command streamed " + bytes + " bytes and then produced nothing for "
                 + (stall / 1000) + "s. " + diagnosis());

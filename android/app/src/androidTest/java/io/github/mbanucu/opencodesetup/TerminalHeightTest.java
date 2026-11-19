@@ -3,6 +3,8 @@ package io.github.mbanucu.opencodesetup;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import android.content.Intent;
+
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.By;
@@ -15,6 +17,10 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -59,11 +65,12 @@ public final class TerminalHeightTest {
     public void lastLineFitsAtEveryHeight() throws Exception {
         int previous = -1;
         for (float fraction : FRACTIONS) {
+            long mark = eventsMark();
             openFilledTerminalAt(fraction);
 
             // The full buffer is what matters: an overflowing terminal keeps its
             // newest row against the bottom edge, a two line one does not.
-            String tail = settledTail();
+            String tail = settledTail(mark);
             assertNotNull("the filled terminal reports its last line at " + fraction, tail);
             assertTrue("the last line has text at " + fraction + ": " + tail,
                     !tail.contains("\"chars\":0"));
@@ -88,17 +95,22 @@ public final class TerminalHeightTest {
      */
     private void openFilledTerminalAt(float fraction) throws Exception {
         for (int attempt = 0; attempt < 3; attempt++) {
-            device.executeShellCommand("am start -W -f 0x10008000 -n " + PACKAGE + "/.MainActivity"
-                    + " --ef terminal_fraction " + fraction
-                    + " --ei filler_lines 300");
+            // Started in-process, with the same extras a shell command carried:
+            // the shell was most of what an attempt cost.
+            InstrumentationRegistry.getInstrumentation().getTargetContext().startActivity(
+                    new Intent(Intent.ACTION_MAIN)
+                            .setClassName(PACKAGE, PACKAGE + ".MainActivity")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                    | Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                            .putExtra("terminal_fraction", fraction)
+                            .putExtra("filler_lines", 300));
 
-            UiObject2 open = device.wait(Until.findObject(By.text("Check setup")), SHORT);
-            if (open == null) {
+            UiObject2 check = device.wait(Until.findObject(By.text("Check setup")), SHORT);
+            if (check == null) {
                 continue;
             }
-            open.click();
+            check.click();
 
-            device.executeShellCommand("logcat -c");
             UiObject2 run = device.wait(Until.findObject(By.text("Run check")), SHORT);
             if (run == null) {
                 continue;
@@ -116,7 +128,7 @@ public final class TerminalHeightTest {
      * <p>Clearing the terminal publishes an empty screen, and every repaint while
      * a chunk lands publishes another line; the one that matters is the last.
      */
-    private String settledTail() throws Exception {
+    private String settledTail(long mark) throws Exception {
         // Silence is the signal: the page republishes whenever its screen or its
         // size changes, so the measurements have stopped coming when the log has
         // gone this long without a new line. A fixed sleep was either wasted time
@@ -125,7 +137,7 @@ public final class TerminalHeightTest {
         long quietSince = System.currentTimeMillis();
         long deadline = quietSince + SHORT;
         while (System.currentTimeMillis() < deadline) {
-            String latest = device.executeShellCommand("logcat -d -s OpencodeSetup:I");
+            String latest = eventsSince(mark);
             if (!latest.equals(log)) {
                 log = latest;
                 quietSince = System.currentTimeMillis();
@@ -144,6 +156,35 @@ public final class TerminalHeightTest {
             }
         }
         return tail;
+    }
+
+    /**
+     * What the app logged after {@code mark}, read from the file it writes.
+     *
+     * <p>The page republishes a line per change, so this is the same evidence
+     * {@code logcat -d} gave, without a shell process on every 50 ms poll.
+     */
+    private String eventsSince(long mark) {
+        File file = new File(InstrumentationRegistry.getInstrumentation().getTargetContext()
+                .getExternalFilesDir(null), "events.log");
+        if (!file.isFile()) {
+            return "";
+        }
+        try (RandomAccessFile in = new RandomAccessFile(file, "r")) {
+            long start = Math.min(mark, in.length());
+            in.seek(start);
+            byte[] buffer = new byte[(int) (in.length() - start)];
+            in.readFully(buffer);
+            return new String(buffer, StandardCharsets.UTF_8);
+        } catch (IOException unreadable) {
+            return "";
+        }
+    }
+
+    /** The event log's length now, so the next reads only see what follows. */
+    private long eventsMark() {
+        return new File(InstrumentationRegistry.getInstrumentation().getTargetContext()
+                .getExternalFilesDir(null), "events.log").length();
     }
 
     private int heightOf(String tail) {
