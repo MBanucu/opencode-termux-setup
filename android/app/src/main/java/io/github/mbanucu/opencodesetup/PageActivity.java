@@ -145,6 +145,10 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         }
         write(text.toString());
         reveal();
+        // reveal() scrolls to the terminal; a tall one would push the page's
+        // actions out of view, and the terminal is measured from the DOM, which
+        // does not need it on screen.
+        page.post(() -> page.scrollTo(0, 0));
     }
 
     @Override
