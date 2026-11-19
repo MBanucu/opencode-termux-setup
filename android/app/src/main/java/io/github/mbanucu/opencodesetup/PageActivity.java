@@ -294,8 +294,16 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             frame.setVisibility(View.GONE);
             terminalFrame = frame;
 
-            // Tall enough to be useful: a third of the page was not.
-            int height = Math.max(dp(300), Math.round(getResources().getDisplayMetrics().heightPixels * 0.45f));
+            // Tall enough to be useful: a third of the page was not. A test can
+            // pin the height through the intent, so the same terminal can be
+            // measured tall and short on one device.
+            float fraction = getIntent() == null
+                    ? 0f : getIntent().getFloatExtra("terminal_fraction", 0f);
+            int height = fraction > 0f
+                    ? Math.max(dp(120), Math.round(
+                            getResources().getDisplayMetrics().heightPixels * fraction))
+                    : Math.max(dp(300), Math.round(
+                            getResources().getDisplayMetrics().heightPixels * 0.45f));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, height);
             params.topMargin = dp(12);
@@ -606,6 +614,15 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
      * a screen reader, and to {@code live-output.txt} for adb.
      */
     private final class Screen {
+        /**
+         * Where the emulator's last line ends, so the placement can be checked
+         * without a screenshot: {@code tail:{"fits":true,...}}.
+         */
+        @JavascriptInterface
+        public void onTail(String json) {
+            Diagnostics.log(PageActivity.this, "tail:" + json);
+        }
+
         @JavascriptInterface
         public void onScreen(String text) {
             screen = text;

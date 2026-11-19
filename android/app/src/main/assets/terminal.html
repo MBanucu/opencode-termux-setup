@@ -101,6 +101,37 @@
     return lines.slice(-40).join('\n');
   }
 
+  /**
+   * Where the last written line ends, in CSS pixels, against the bottom of the
+   * terminal area.
+   *
+   * <p>This is what "the last line is fully visible" means where it can be
+   * measured: the row's bottom edge must not be past the area's, so it cannot be
+   * clipped by the rounded frame. A test asserts it at several terminal heights
+   * instead of trusting a screenshot.
+   */
+  function tailInfo() {
+    var area = document.getElementById('screen').getBoundingClientRect();
+    var rows = document.querySelectorAll('.xterm-rows > div');
+    for (var i = rows.length - 1; i >= 0; i--) {
+      var text = rows[i].textContent || '';
+      if (text.trim() === '') {
+        continue;
+      }
+      var box = rows[i].getBoundingClientRect();
+      return {
+        terminal: Math.round(area.height),
+        row: Math.round(box.height),
+        bottom: Math.round(box.bottom),
+        limit: Math.round(area.bottom),
+        fits: box.bottom <= area.bottom + 1,
+        chars: text.length
+      };
+    }
+    return { terminal: Math.round(area.height), row: 0, bottom: 0,
+             limit: Math.round(area.bottom), fits: false, chars: 0 };
+  }
+
   // Published once a second, not per chunk: every update is an accessibility
   // event, and a terminal that fires four a second keeps UI Automator from
   // getting a stable snapshot of the page.
@@ -110,6 +141,7 @@
     if (text !== last && window.AndroidBridge) {
       last = text;
       window.AndroidBridge.onScreen(text);
+      window.AndroidBridge.onTail(JSON.stringify(tailInfo()));
     }
   }, 1000);
 })();

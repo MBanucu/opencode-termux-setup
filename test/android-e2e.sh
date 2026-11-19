@@ -109,6 +109,11 @@ fi
 run_phase "$pkg.SetupFlowTest" "$setup_log"
 grep -q 'OK (6 tests)' "$setup_log" || { echo "setup flow FAILED" >&2; exit 1; }
 
+echo "== terminal heights (last line fits at each) =="
+height_log=$(mktemp)
+run_phase "$pkg.TerminalHeightTest" "$height_log"
+grep -q 'OK (1 test)' "$height_log" || { echo "terminal height test FAILED" >&2; exit 1; }
+
 echo "== denial path (permission revoked, separate run) =="
 # Revoking a dangerous permission kills the target process, hence a second run.
 adb shell "pm revoke $pkg com.termux.permission.RUN_COMMAND" || true
