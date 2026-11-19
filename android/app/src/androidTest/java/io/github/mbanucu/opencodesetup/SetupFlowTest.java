@@ -24,6 +24,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -56,10 +57,13 @@ public final class SetupFlowTest {
     private static final String PACKAGE = "io.github.mbanucu.opencodesetup";
     private static final String TERMUX = "com.termux";
     private static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
-    private static final long SHORT = 10_000;
+    /** A screen change: a page opens, a button appears. */
+    private static final long SHORT = 5_000;
     private static final long LONG = 120_000;
-    /** Time to wait for one check to come back from Termux. */
-    private static final long POLL = 30_000;
+    /** One Termux round trip; a check answers in about a second. */
+    private static final long POLL = 12_000;
+    /** The first chunk of a command that is still running. */
+    private static final long STREAM = 8_000;
     /** A removal is one apt transaction, but it waits for the apt lock. */
     private static final long UNINSTALL_BUDGET = 300_000;
     /** A reinstall downloads ~70 MB, so it gets a download-sized budget. */
@@ -76,9 +80,6 @@ public final class SetupFlowTest {
             Pattern.compile("(?s)^opencode is not installed\\n+\\nexit code 0$");
     private static final Pattern CHECK_INSTALLED =
             Pattern.compile("(?s)^opencode v\\S+\\n+\\nexit code 0$");
-
-    /** What the box says before the first line of output arrives. */
-    private static final String WAITING = "Running in Termux";
 
     private UiDevice device;
 
@@ -200,6 +201,7 @@ public final class SetupFlowTest {
 
         UiObject2 remove = device.wait(Until.findObject(By.text("Remove opencode")), SHORT);
         assertNotNull("the page offers the action", remove);
+        device.executeShellCommand("logcat -c");
         remove.click();
 
         // Nothing may be raised over this app: the command runs in Termux's
@@ -209,8 +211,7 @@ public final class SetupFlowTest {
         assertFalse("the Termux window was not brought forward",
                 device.hasObject(By.pkg(TERMUX)));
         shot("05-uninstall-started.png");
-        assertNotNull("the page shows Termux's output while the removal is still running",
-                streamingText());
+        assertStreamed("the page shows Termux's output while the removal is still running");
 
         String report = checkUntil(CHECK_REMOVED, UNINSTALL_BUDGET);
         assertTrue("the check that reported the removal ran in the app: " + report,
@@ -238,13 +239,18 @@ public final class SetupFlowTest {
      */
     private void installThroughThePage() throws Exception {
         bringToFront();
-        device.findObject(By.text("Install opencode")).click();
+        UiObject2 install = device.findObject(By.text("Install opencode"));
+        if (install == null) {
+            fail("the install action is not on screen: " + diagnosis());
+        }
+        install.click();
         assertTrue("the install page opens",
                 device.wait(Until.hasObject(By.text("Download about 70 MB?")), SHORT));
 
         UiObject2 accept = device.wait(
                 Until.findObject(By.text(Pattern.compile("(?i)^start setup$"))), SHORT);
         assertNotNull("the page offers to start the setup", accept);
+        device.executeShellCommand("logcat -c");
         accept.click();
 
         assertTrue("the app stays in front",
@@ -252,8 +258,7 @@ public final class SetupFlowTest {
         assertFalse("the Termux window was not brought forward",
                 device.hasObject(By.pkg(TERMUX)));
         shot("07-install-started.png");
-        assertNotNull("the page shows the install as it happens, not only at the end",
-                streamingText());
+        assertStreamed("the page shows the install as it happens, not only at the end");
 
         String report = checkUntil(CHECK_INSTALLED, INSTALL_BUDGET);
         assertTrue("the check that reported the version ran in the app: " + report,
@@ -278,12 +283,12 @@ public final class SetupFlowTest {
         device.executeShellCommand("am start -W -n " + PACKAGE + "/.AdbCommandActivity"
                 + " -e command check");
         String report = awaitFile(result,
-                text -> CHECK_INSTALLED.matcher(text.trim()).matches(), 30_000);
+                text -> CHECK_INSTALLED.matcher(text.trim()).matches(), 15_000);
         assertNotNull("adb check returns Termux's real answer, not an acknowledgement", report);
 
         device.executeShellCommand("am start -W -n " + PACKAGE + "/.AdbCommandActivity"
                 + " -e command bogus");
-        String error = awaitFile(result, text -> text.contains("unknown command"), 15_000);
+        String error = awaitFile(result, text -> text.contains("unknown command"), 8_000);
         assertNotNull("an unknown command is refused with a reason", error);
     }
 
@@ -314,24 +319,50 @@ public final class SetupFlowTest {
         return node == null ? null : node.getContentDescription();
     }
 
+    /** Fails at the moment output should have started, quoting what happened. */
+    private void assertStreamed(String message) throws Exception {
+        if (streamingText() == null) {
+            fail(message + " - no live chunk in " + (STREAM / 1000) + "s. " + diagnosis());
+        }
+    }
+
     /**
-     * The output the page is showing while Termux is still working.
+     * What the screen and the app's own event log say right now. A failure
+     * should not need a re-run to be understood.
+     */
+    private String diagnosis() throws Exception {
+        device.executeShellCommand("uiautomator dump /sdcard/diag.xml >/dev/null 2>&1");
+        String xml = device.executeShellCommand("cat /sdcard/diag.xml 2>/dev/null");
+        StringBuilder visible = new StringBuilder();
+        Matcher text = Pattern.compile("text=\"([^\"]+)\"").matcher(xml);
+        while (text.find() && visible.length() < 300) {
+            visible.append(visible.length() == 0 ? "" : " | ").append(text.group(1));
+        }
+        return "screen [" + visible + "] events [" + logTail() + "]";
+    }
+
+    /** The last events the app recorded, on one line whose wording is greppable. */
+    private String logTail() throws Exception {
+        return device.executeShellCommand("logcat -d -s OpencodeSetup:I | tail -12")
+                .replace("\n", " ; ").trim();
+    }
+
+    /**
+     * Proof that output arrived while the command was still running.
      *
-     * <p>Read from {@code live-output.txt}, which the page rewrites with exactly
-     * the text xterm.js is displaying. The terminal repaints continuously during
-     * an install, and UI Automator does not reliably hand back the WebView node
-     * while that happens, so the page's own copy of the screen is what this
-     * looks at; the same text is also its accessibility description.
+     * <p>The app logs one {@code stream:<bytes>} line per chunk it hands to the
+     * terminal. That is the only signal that survives the terminal repainting:
+     * UI Automator does not reliably return a WebView node while it repaints.
+     * The log is cleared before the command starts, so a line here cannot come
+     * from an earlier run or from the final result.
      */
     private String streamingText() throws Exception {
-        File live = new File(InstrumentationRegistry.getInstrumentation()
-                .getTargetContext().getExternalFilesDir(null), "live-output.txt");
-        long deadline = System.currentTimeMillis() + POLL;
+        long deadline = System.currentTimeMillis() + STREAM;
         while (System.currentTimeMillis() < deadline) {
-            String text = read(live);
-            if (text != null && !text.trim().isEmpty()
-                    && !text.startsWith(WAITING) && !text.contains("exit code")) {
-                return text;
+            String log = device.executeShellCommand("logcat -d -s OpencodeSetup:I");
+            Matcher stream = Pattern.compile("stream:(\\d+)").matcher(log);
+            if (stream.find()) {
+                return "streamed " + stream.group(1) + " bytes while running";
             }
             Thread.sleep(250);
         }
@@ -374,7 +405,7 @@ public final class SetupFlowTest {
             }
         }
         fail("Termux never answered " + wanted + " within " + (budget / 1000)
-                + "s; the last answer was: " + report);
+                + "s; the last answer was: " + report + ". " + diagnosis());
         return report;
     }
 

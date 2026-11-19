@@ -123,6 +123,17 @@ adb shell cat /sdcard/Android/data/io.github.mbanucu.opencodesetup/files/last-re
 adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity -e command uninstall --ez purge true
 ```
 
+Two files exist for exactly this: `events.log` is one timestamped line per event
+(page opened, command sent, each chunk received, the result, a refusal), and
+`live-output.txt` is the text the terminal is showing right now.
+
+```bash
+adb shell cat /sdcard/Android/data/io.github.mbanucu.opencodesetup/files/events.log
+```
+
+The end-to-end suite quotes both in its failure messages, so a red run explains
+itself without reproducing it.
+
 While a command runs, the page also rewrites `live-output.txt` in the same
 directory with the text the terminal is showing, so a script can follow progress
 instead of waiting for the answer:

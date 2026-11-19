@@ -102,6 +102,8 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
         setContentView(scroll);
 
+        Diagnostics.log(this, "page:" + getClass().getSimpleName());
+
         if (!(this instanceof MainActivity)) {
             // The sub-pages sit on top of the main screen; a visible way back
             // beats relying on the gesture alone.
@@ -405,6 +407,8 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         try {
             TermuxCommands.send(this, command, label, description,
                     opened == null ? 0 : opened.port());
+            Diagnostics.log(this, "sent " + label + " port="
+                    + (opened == null ? "none" : opened.port()));
             clearNotice();
             if (opened != null) {
                 startOutput();
@@ -412,6 +416,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         } catch (RuntimeException refused) {
             stopListening();
             running(false);
+            Diagnostics.log(this, "refused: " + refused);
             Log.w(TAG, "Termux refused the command", refused);
             copy(TermuxCommands.ALLOW_EXTERNAL_APPS);
             notice(getString(R.string.permission_title) + "\n\n"
@@ -423,7 +428,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
 
     @Override
     public void onCommandResult(String text) {
-        Log.i(TAG, "result: " + text.replace("\n", " | "));
+        Diagnostics.log(this, "result: " + text.replace("\n", " | "));
         stopListening();
         running(false);
         script("resetTerm()");
@@ -510,7 +515,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 // Only live chunks are logged this way: the final result is a
                 // different path, so a "stream:" line always means output
                 // arrived while the command was still running.
-                Log.i(TAG, "stream:" + read);
+                Diagnostics.log(this, "stream:" + read);
                 write(new String(buffer, 0, read));
             }
         } catch (IOException done) {
@@ -604,6 +609,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         @JavascriptInterface
         public void onScreen(String text) {
             screen = text;
+            Diagnostics.log(PageActivity.this, "screen:" + text.length());
             File dir = getExternalFilesDir(null);
             if (dir != null) {
                 File file = new File(dir, "live-output.txt");
