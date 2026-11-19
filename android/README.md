@@ -67,6 +67,11 @@ CI compiles both APKs on every push (`assembleDebugAndroidTest`) and uploads the
 test APK, so a test that stops compiling cannot land. Running them needs a device
 or emulator.
 
+Install the app and the test APK **from the same artifact set**. CI mints a fresh
+debug keystore on every run, so a test APK from one run does not match an app APK
+from another, and `am instrument` refuses with `does not have a signature
+matching the target`.
+
 ## Layout
 
 ```
