@@ -44,12 +44,32 @@
   term.loadAddon(fit);
   term.open(document.getElementById('screen'));
 
+  /**
+   * Guarantees the newest row ends inside the terminal area.
+   *
+   * <p>The fit addon derives the row count from a fractional cell height, and on
+   * this device's pixel ratio the last row can still land a few pixels past the
+   * bottom: measured, not guessed, as {"bottom":503,"limit":496}. When that
+   * happens the terminal gives up one row, which was spare space anyway - better
+   * a blank line fewer than a clipped one.
+   */
+  function keepTailVisible() {
+    var area = document.getElementById('screen').getBoundingClientRect();
+    var rows = document.querySelectorAll('.xterm-rows > div');
+    var last = rows[rows.length - 1];
+    if (!last) return;
+    if (last.getBoundingClientRect().bottom - area.bottom > 0.5 && term.rows > 3) {
+      term.resize(term.cols, term.rows - 1);
+    }
+  }
+
   function fitNow() {
     try {
       fit.fit();
       // Fitting changes the row count, which can leave the newest line below
       // the last visible row.
       term.scrollToBottom();
+      keepTailVisible();
     } catch (e) { /* hidden or not laid out yet */ }
   }
   fitNow();
@@ -73,7 +93,10 @@
     // is what left the last line hanging below the edge.
     var atBottom = term.buffer.active.viewportY >= term.buffer.active.baseY;
     term.write(bytes(base64), function () {
-      if (atBottom) term.scrollToBottom();
+      if (atBottom) {
+        term.scrollToBottom();
+        keepTailVisible();
+      }
     });
   };
 

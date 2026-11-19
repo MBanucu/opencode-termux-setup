@@ -66,7 +66,7 @@ public final class TerminalHeightTest {
             device.executeShellCommand("logcat -c");
             check.click();
 
-            String tail = awaitTail(ANSWER);
+            String tail = settledTail();
             assertNotNull("the terminal reports where its last line ends at " + fraction, tail);
             assertTrue("the last line has text at " + fraction + ": " + tail,
                     !tail.contains("\"chars\":0"));
@@ -91,6 +91,17 @@ public final class TerminalHeightTest {
      * top, and that instance reads the extra in {@code onCreate}.
      */
     private void openAt(float fraction) throws Exception {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            launch(fraction);
+            if (device.hasObject(By.text("Check setup"))) {
+                Thread.sleep(500);
+                return;
+            }
+        }
+        org.junit.Assert.fail("the page did not open at " + fraction);
+    }
+
+    private void launch(float fraction) throws Exception {
         // CLEAR_TASK (0x8000) with NEW_TASK (0x10000000): a fresh page instance
         // without stopping the process the test runner lives in, which is what a
         // plain start does not guarantee - it reused the page and every height
@@ -104,28 +115,25 @@ public final class TerminalHeightTest {
     }
 
     /**
-     * The first geometry line that measured something.
+     * The last geometry line that measured something, once the page has settled.
      *
-     * <p>Clearing the terminal publishes an empty screen, and with it a line with
-     * no row in it; taking that one made a page that had rendered fine look like
-     * it had no text at all.
+     * <p>Clearing the terminal publishes an empty screen, and every repaint while
+     * a chunk lands publishes another line; the one that matters is the last, not
+     * the first that happens to carry text.
      */
-    private String awaitTail(long budget) throws Exception {
-        long deadline = System.currentTimeMillis() + budget;
-        Pattern line = Pattern.compile("tail:\\{[^}]*\\}");
+    private String settledTail() throws Exception {
+        Thread.sleep(2_000);
+        String tail = null;
+        Matcher found = Pattern.compile("tail:\\{[^}]*\\}").matcher(
+                device.executeShellCommand("logcat -d -s OpencodeSetup:I"));
         Pattern chars = Pattern.compile("\"chars\":(\\d+)");
-        while (System.currentTimeMillis() < deadline) {
-            String log = device.executeShellCommand("logcat -d -s OpencodeSetup:I");
-            Matcher tail = line.matcher(log);
-            while (tail.find()) {
-                Matcher count = chars.matcher(tail.group());
-                if (count.find() && Integer.parseInt(count.group(1)) > 0) {
-                    return tail.group();
-                }
+        while (found.find()) {
+            Matcher count = chars.matcher(found.group());
+            if (count.find() && Integer.parseInt(count.group(1)) > 0) {
+                tail = found.group();
             }
-            Thread.sleep(250);
         }
-        return null;
+        return tail;
     }
 
     private int heightOf(String tail) {
