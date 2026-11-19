@@ -48,7 +48,7 @@ public final class TerminalHeightTest {
     private UiDevice device;
 
     @Before
-    public void grantPermission() {
+    public void grantPermission() throws Exception {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
         device.executeShellCommand("pm grant " + PACKAGE + " " + PERMISSION);
     }
