@@ -13,6 +13,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestName;
 import org.junit.runner.RunWith;
 
 import java.io.File;
@@ -44,6 +45,10 @@ public final class PtyRenderingTest {
 
     @Rule
     public final TestTimings timings = new TestTimings();
+
+    /** Names the milestone after the case that drew the screen. */
+    @Rule
+    public final TestName testName = new TestName();
 
     private Context context;
     private File screen;
@@ -169,6 +174,7 @@ public final class PtyRenderingTest {
 
     /** Starts the terminal page with these bytes and nothing else to run. */
     private void render(String ptyBytes) {
+        TestMilestones.mark("pty-" + testName.getMethodName());
         Intent probe = new Intent(context, TerminalActivity.class)
                 .putExtra(EXTRA_PROBE,
                         Base64.encodeToString(ptyBytes.getBytes(StandardCharsets.UTF_8),

@@ -107,7 +107,7 @@ public final class SetupFlowTest {
         assertNotNull("uninstall", device.findObject(By.text("Uninstall opencode")));
         assertNotNull("check", device.findObject(By.text("Check setup")));
         assertNotNull("open Termux", device.findObject(By.text("Open Termux")));
-        shot("01-main.png");
+        milestone("main");
     }
 
     @Test
@@ -127,7 +127,7 @@ public final class SetupFlowTest {
         assertTrue("the command it will run is shown", text.contains("install.sh"));
         assertTrue("the third-party build is named so consent is informed",
                 text.contains("third-party"));
-        shot("02-consent.png");
+        milestone("consent");
 
         // Platform dialog buttons are rendered uppercase, so match the label
         // the accessibility tree reports rather than the string resource.
@@ -166,7 +166,7 @@ public final class SetupFlowTest {
                 preview.getText().contains("--purge"));
         UiObject2 keepDetail = device.findObject(By.textContains("~/.config/opencode"));
         assertNotNull("the page names the directories the default keeps", keepDetail);
-        shot("03-uninstall-page.png");
+        milestone("uninstall-page");
 
         purge.click();
         assertTrue("deleting everything changes the command",
@@ -178,7 +178,7 @@ public final class SetupFlowTest {
                 device.findObject(By.text("Keep my settings")).isChecked());
         UiObject2 purgeDetail = device.findObject(By.textContains("connected again"));
         assertNotNull("the destructive choice says what it destroys", purgeDetail);
-        shot("04-purge-option.png");
+        milestone("purge-option");
 
         keep.click();
         assertTrue("going back to the safe choice removes --purge",
@@ -221,7 +221,7 @@ public final class SetupFlowTest {
                 device.wait(Until.hasObject(By.pkg(PACKAGE)), SHORT));
         assertFalse("the Termux window was not brought forward",
                 device.hasObject(By.pkg(TERMUX)));
-        shot("05-uninstall-started.png");
+        milestone("uninstall-started");
         assertStreamed("the page shows Termux's output while the removal is still running");
         // Ask only once the removal is over: a check sent while it runs answers
         // with the old state, and the two results race in last-result.txt.
@@ -230,7 +230,7 @@ public final class SetupFlowTest {
         String report = checkUntil(CHECK_REMOVED, 60_000);
         assertTrue("the check that reported the removal ran in the app: " + report,
                 device.hasObject(By.pkg(PACKAGE)));
-        shot("06-uninstalled.png");
+        milestone("uninstalled");
     }
 
     /**
@@ -271,14 +271,14 @@ public final class SetupFlowTest {
                 device.wait(Until.hasObject(By.pkg(PACKAGE)), SHORT));
         assertFalse("the Termux window was not brought forward",
                 device.hasObject(By.pkg(TERMUX)));
-        shot("07-install-started.png");
+        milestone("install-started");
         assertStreamed("the page shows the install as it happens, not only at the end");
         waitForResult(STALL);
 
         String report = checkUntil(CHECK_INSTALLED, 60_000);
         assertTrue("the check that reported the version ran in the app: " + report,
                 device.hasObject(By.pkg(PACKAGE)));
-        shot("08-installed.png");
+        milestone("installed");
     }
 
     /**
@@ -565,10 +565,11 @@ public final class SetupFlowTest {
         }
     }
 
-    private void shot(String name) throws Exception {
-        File dir = new File(InstrumentationRegistry.getInstrumentation()
-                .getTargetContext().getExternalFilesDir(null), "screenshots");
-        assertTrue("screenshot directory", dir.isDirectory() || dir.mkdirs());
-        assertTrue("screenshot " + name, device.takeScreenshot(new File(dir, name)));
+    /**
+     * A moment worth finding later. It used to take a PNG; the suite records the
+     * screen now, and this only names the second to look at in that recording.
+     */
+    private void milestone(String name) {
+        TestMilestones.mark(name);
     }
 }

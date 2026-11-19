@@ -8,7 +8,6 @@ import android.content.Intent;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.uiautomator.UiDevice;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -28,6 +27,10 @@ import java.nio.charset.StandardCharsets;
  * that shows a mess of half-drawn boxes. This is a visual check with a mechanical
  * floor under it - the screen must be substantial and must not contain raw escape
  * sequences - plus a screenshot for a person to look at.
+ *
+ * <p>The frame to look at is not taken here: the run is recorded, this marks the
+ * moment, and {@code test/frames.py extract --names opencode-tui} produces the
+ * PNG from that recording.
  *
  * <p>Opt in, because it needs opencode installed on the device:
  * {@code bash test/local-build.sh --only io.github.mbanucu.opencodesetup.OpencodeTuiTest}
@@ -55,12 +58,10 @@ public final class OpencodeTuiTest {
 
         String shown = awaitScreen(screen, text -> visible(text) > 20);
 
-        // Leave both behind whether it passed or not: the screenshot is for a
-        // person, and the text is what a failure can be read from later.
-        File dir = new File(context.getExternalFilesDir(null), "screenshots");
-        dir.mkdirs();
-        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-                .takeScreenshot(new File(dir, "opencode-tui.png"));
+        // Leave the text behind whether it passed or not, and mark the second in
+        // the recording where the TUI was on screen: a frame can be extracted
+        // from it with test/frames.py when somebody wants to look.
+        TestMilestones.mark("opencode-tui");
         try (java.io.FileOutputStream out = new java.io.FileOutputStream(
                 new File(context.getExternalFilesDir(null), "tui-screen.txt"))) {
             out.write(shown.getBytes(StandardCharsets.UTF_8));

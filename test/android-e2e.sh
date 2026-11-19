@@ -4,6 +4,7 @@
 #
 #   bash test/android-e2e.sh [app-debug.apk] [app-debug-androidTest.apk]
 #   bash test/android-e2e.sh --only <class>[#method]   # one test, nothing else
+#   bash test/android-e2e.sh --no-record                # skip the screen recording
 #
 # Needs: adb in PATH, the device authorised, Termux installed with
 # allow-external-apps=true. python3 is optional: it only adds the timing history
@@ -11,6 +12,13 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+
+# The run is recorded to test/recordings/<run>.mp4 unless --no-record is given.
+record=true
+if [ "${1:-}" = "--no-record" ]; then
+    record=false
+    shift
+fi
 
 # A single class or one method of it, for the loop where waiting for the whole
 # suite is the slow part. Everything else - install, timings, the grant dance -
@@ -64,6 +72,8 @@ watcher_pid=""
 cleanup() {
     [ -n "$watcher_pid" ] && kill "$watcher_pid" >/dev/null 2>&1 || true
     [ -n "$logcat_pid" ] && kill "$logcat_pid" >/dev/null 2>&1 || true
+    # Also on a failure: the recording is worth more then, not less.
+    stop_recording
 }
 trap cleanup EXIT
 
@@ -111,6 +121,78 @@ run_phase() {
     fi
 }
 
+# --- recording ---------------------------------------------------------------
+# One MP4 for the run, in a format a player can stream (H.264 in MP4, remuxed
+# with faststart). Tests mark moments with TestMilestones, which logs the
+# device's monotonic uptime; the recording starts at a known uptime too, so a
+# milestone's second in the video is a subtraction, not a guess. Nothing is
+# extracted from the video during the run - test/frames.py does that on demand.
+recording=""
+recording_saved=""
+recording_start_uptime=""
+milestone_log=""
+milestone_pid=""
+
+start_recording() {
+    $record || return 0
+    adb shell "rm -f /data/local/tmp/suite.mp4" >/dev/null 2>&1 || true
+    recording_start_uptime=$(adb shell cat /proc/uptime | awk '{print $1}')
+    recording=$root/test/recordings/$(date +%s).mp4
+    mkdir -p "$(dirname "$recording")"
+    milestone_log=$(mktemp)
+    # A cleared buffer: a milestone from an earlier run would otherwise be read
+    # back as if it belonged to this one.
+    adb logcat -c >/dev/null 2>&1 || true
+    adb logcat -s OpencodeSetup:I > "$milestone_log" 2>/dev/null &
+    milestone_pid=$!
+    # 720x1560 keeps the file small enough to share while still readable.
+    adb shell screenrecord --size 720x1560 --bit-rate 4M --time-limit 900 \
+        /data/local/tmp/suite.mp4 >/dev/null 2>&1 &
+    echo "recording to $recording"
+}
+
+stop_recording() {
+    [ -n "$recording" ] || return 0
+    local saved=$recording
+    recording=""
+    recording_saved=$saved
+    adb shell "pkill -INT screenrecord" >/dev/null 2>&1 || true
+    sleep 2
+    adb pull /data/local/tmp/suite.mp4 "$saved" >/dev/null 2>&1 || true
+    [ -n "$milestone_pid" ] && kill "$milestone_pid" >/dev/null 2>&1 || true
+    milestone_pid=""
+    python3 - "$saved" "$recording_start_uptime" "$milestone_log" <<'PY'
+import json, os, re, sys
+
+recording, start, log = sys.argv[1], float(sys.argv[2]), sys.argv[3]
+milestones = []
+if os.path.isfile(log):
+    for line in open(log, errors="replace"):
+        found = re.search(r"milestone:(\S+) uptime:(\d+)", line)
+        if found:
+            milestones.append({
+                "name": found.group(1),
+                "seconds": round((int(found.group(2)) - start * 1000) / 1000, 2),
+            })
+sidecar = os.path.splitext(recording)[0] + ".json"
+json.dump({"recording": os.path.basename(recording),
+           "startUptime": start,
+           "milestones": milestones}, open(sidecar, "w"), indent=2)
+print("  %d milestone(s) -> %s" % (len(milestones), sidecar))
+PY
+    # A faststart MP4 plays while it is still being downloaded, which is the
+    # difference between a streamable file and one that has to arrive first.
+    if command -v ffmpeg >/dev/null 2>&1 && [ -f "$saved" ]; then
+        if ffmpeg -hide_banner -loglevel error -y -i "$saved" -c copy \
+            -movflags +faststart "$saved.stream.mp4" 2>/dev/null; then
+            mv "$saved.stream.mp4" "$saved"
+        fi
+    fi
+    echo "  recording: $saved"
+}
+
+start_recording
+
 if [ -n "$only" ]; then
     echo "== $only (one test) =="
     # The grant the phases below rely on, so a single test starts the same way.
@@ -121,6 +203,7 @@ if [ -n "$only" ]; then
         echo "$only FAILED" >&2
         exit 1
     }
+    stop_recording
     echo
     echo "one test passed"
     exit 0
@@ -171,6 +254,8 @@ grep -q 'OK (1 test)' "$denied_log" || { echo "denial path FAILED" >&2; exit 1; 
 # permission, and leaving it revoked makes the next manual tap ask for it again.
 adb shell "pm grant $pkg com.termux.permission.RUN_COMMAND" >/dev/null 2>&1 || true
 
+stop_recording
+
 echo
 echo "both runs passed"
 
@@ -180,5 +265,8 @@ if $timing; then
     python3 "$timings" history --db "$timings_db" || true
 fi
 
-echo "screenshots are in the app's external files dir:"
-adb shell "ls /sdcard/Android/data/$pkg/files/screenshots" 2>/dev/null || true
+if [ -n "$recording_saved" ]; then
+    echo
+    echo "frames come out of the recording on demand:"
+    echo "  python3 test/frames.py list --milestones ${recording_saved%.mp4}.json"
+fi
