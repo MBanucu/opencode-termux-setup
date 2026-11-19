@@ -10,8 +10,8 @@ android {
         applicationId = "io.github.mbanucu.opencodesetup"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         // The instrumented end-to-end tests drive the app through UI Automator,
         // which is the accessibility event stream, not screenshots.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

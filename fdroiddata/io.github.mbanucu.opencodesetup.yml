@@ -38,6 +38,15 @@ RepoType: git
 Repo: https://github.com/MBanucu/opencode-termux-setup.git
 
 Builds:
+  # Newest first: test/fdroid-metadata-test.sh reads the first entry as the
+  # current one.  F-Droid accepts either order.
+  - versionName: 0.2.0
+    versionCode: 2
+    commit: android-v0.2.0
+    subdir: android
+    gradle:
+      - yes
+    output: app/build/outputs/apk/release/*.apk
   - versionName: 0.1.0
     versionCode: 1
     commit: android-v0.1.0
@@ -65,5 +74,5 @@ MaintainerNotes: |-
 
 AutoUpdateMode: None
 UpdateCheckMode: None
-CurrentVersion: 0.1.0
-CurrentVersionCode: 1
+CurrentVersion: 0.2.0
+CurrentVersionCode: 2

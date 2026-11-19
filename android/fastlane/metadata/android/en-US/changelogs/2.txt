@@ -1,0 +1,9 @@
+A confirmed action now gets its own page: a full-screen terminal that streams
+Termux's output, with Copy output and Cancel in the footer.
+
+- Every command runs on that page, so the consent screens stay decisions and the
+  output gets the whole screen.
+- Check setup has its own page and reports the installed version in the same
+  terminal.
+- The terminal is rendered by xterm.js, so colours and progress bars from Termux
+  survive the trip, and its last line always stays inside the visible area.
