@@ -36,7 +36,6 @@ public final class UninstallActivity extends PageActivity {
 
         // Shown the way the terminal will print it, not as grey body text.
         preview = mono(getString(R.string.uninstall_preview));
-        outputBox();
         primaryButton(R.string.uninstall_confirm, v -> remove());
         button(R.string.consent_cancel, v -> finish());
         showCommand();
@@ -73,10 +72,13 @@ public final class UninstallActivity extends PageActivity {
     }
 
     private void remove() {
-        runCommand(purging() ? Commands.UNINSTALL_PURGE : Commands.UNINSTALL,
+        // The choice is made here; the removal runs on the terminal page.
+        TerminalActivity.start(this,
+                purging() ? Commands.UNINSTALL_PURGE : Commands.UNINSTALL,
                 "Uninstall opencode",
                 purging()
                         ? "Remove the opencode package, its apt repository and all its data"
-                        : "Remove the opencode package and its apt repository, keeping its data");
+                        : "Remove the opencode package and its apt repository, keeping its data",
+                getString(R.string.uninstall_confirm));
     }
 }

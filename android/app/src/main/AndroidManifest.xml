@@ -60,6 +60,13 @@
             android:exported="false"
             android:label="@string/check_title" />
 
+        <!-- A confirmed command gets this page: header, the terminal filling the
+             screen, footer with copy and cancel. Not exported. -->
+        <activity
+            android:name=".TerminalActivity"
+            android:exported="false"
+            android:label="@string/app_name" />
+
         <!-- adb entry point, so every action the UI offers is scriptable:
                adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity -e command check
              It is exported because adb needs that; it sends the same Termux

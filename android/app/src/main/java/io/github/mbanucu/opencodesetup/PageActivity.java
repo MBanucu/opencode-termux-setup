@@ -11,6 +11,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Base64;
@@ -79,6 +80,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private Button copyButton;
     private boolean outputLoaded;
     private boolean fillerDone;
+    private boolean fullScreen;
     private final Deque<String> waitingScripts = new ArrayDeque<>();
     private final List<Button> actionButtons = new ArrayList<>();
     private final List<View> collapseOnRun = new ArrayList<>();
@@ -121,6 +123,47 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     protected void onResume() {
         super.onResume();
         RunCommandReceiver.setListener(this);
+    }
+
+    /**
+     * Switches this page to a terminal-first layout.
+     *
+     * <p>A header with the way back, the terminal taking every pixel between it
+     * and the footer, and a footer with copy and cancel: after a command has been
+     * confirmed, the output is the only thing left to look at.
+     */
+    protected void terminalPage(CharSequence title) {
+        fullScreen = true;
+        int pad = dp(12);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(pad, pad, pad, pad);
+        root.setFitsSystemWindows(true);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView back = new TextView(this);
+        back.setText(getString(R.string.back) + "  ‹");
+        back.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        back.setPadding(0, 0, dp(12), 0);
+        back.setOnClickListener(v -> finish());
+        header.addView(back);
+
+        TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        heading.setTypeface(Typeface.DEFAULT_BOLD);
+        heading.setSingleLine(true);
+        heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        header.addView(heading, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(header);
+
+        column = root;
+        page = null;
+        setContentView(root);
     }
 
     /**
@@ -325,20 +368,32 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             frame.setVisibility(View.GONE);
             terminalFrame = frame;
 
-            // Tall enough to be useful: a third of the page was not. A test can
-            // pin the height through the intent, so the same terminal can be
-            // measured tall and short on one device.
+            // A test can pin the height through the intent, so the same terminal
+            // can be measured tall and short on one device.
             float fraction = getIntent() == null
                     ? 0f : getIntent().getFloatExtra("terminal_fraction", 0f);
-            int height = fraction > 0f
-                    ? Math.max(dp(120), Math.round(
-                            getResources().getDisplayMetrics().heightPixels * fraction))
-                    : Math.max(dp(300), Math.round(
-                            getResources().getDisplayMetrics().heightPixels * 0.45f));
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, height);
-            params.topMargin = dp(12);
-            params.bottomMargin = dp(8);
+            LinearLayout.LayoutParams params;
+            if (fullScreen) {
+                // Everything between the header and the footer. A pinned height
+                // only exists for the test that compares several of them.
+                params = fraction > 0f
+                        ? new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                                Math.max(dp(120), Math.round(
+                                        getResources().getDisplayMetrics().heightPixels * fraction)))
+                        : new LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+                params.topMargin = dp(8);
+            } else {
+                int height = fraction > 0f
+                        ? Math.max(dp(120), Math.round(
+                                getResources().getDisplayMetrics().heightPixels * fraction))
+                        : Math.max(dp(300), Math.round(
+                                getResources().getDisplayMetrics().heightPixels * 0.45f));
+                params = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, height);
+                params.topMargin = dp(12);
+                params.bottomMargin = dp(8);
+            }
             column.addView(frame, params);
 
             busy = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -349,15 +404,36 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             progressParams.bottomMargin = dp(8);
             column.addView(busy, progressParams);
 
-            // Only meaningful once there is output; hidden until then, so it
-            // does not sit on a page that has run nothing.
             copyButton = new Button(this);
             copyButton.setText(R.string.copy_output);
             copyButton.setAllCaps(false);
             copyButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             copyButton.setOnClickListener(v -> copy(screen));
-            copyButton.setVisibility(View.GONE);
-            column.addView(copyButton, buttonParams());
+
+            if (fullScreen) {
+                // Footer: copy and cancel side by side, always within reach of a
+                // thumb while the terminal above scrolls on its own.
+                copyButton.setEnabled(false);
+                LinearLayout footer = new LinearLayout(this);
+                footer.setOrientation(LinearLayout.HORIZONTAL);
+                footer.setPadding(0, dp(8), 0, 0);
+                footer.addView(copyButton, new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                Button cancel = new Button(this);
+                cancel.setText(R.string.consent_cancel);
+                cancel.setAllCaps(false);
+                cancel.setOnClickListener(v -> finish());
+                LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                cancelParams.leftMargin = dp(8);
+                footer.addView(cancel, cancelParams);
+                column.addView(footer);
+            } else {
+                // Only meaningful once there is output; hidden until then, so it
+                // does not sit on a page that has run nothing.
+                copyButton.setVisibility(View.GONE);
+                column.addView(copyButton, buttonParams());
+            }
 
             output = web;
             web.loadUrl("file:///android_asset/terminal.html");
@@ -599,18 +675,24 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         frame.setVisibility(View.VISIBLE);
         if (copyButton != null) {
             copyButton.setVisibility(View.VISIBLE);
+            copyButton.setEnabled(true);
         }
         frame.post(() -> {
             script("fitNow()");
+            ScrollView scroller = page;
+            if (scroller == null) {
+                // The terminal-first page has no fold to scroll past.
+                return;
+            }
             // Scroll so the terminal's *last* line is on screen, not just its
             // top: a tall terminal, or a landscape screen, otherwise ends below
             // the fold and the newest output is never seen as it arrives.
-            int viewport = page.getHeight();
+            int viewport = scroller.getHeight();
             int target = viewport <= 0
                     ? frame.getTop()
                     : Math.min(frame.getTop(),
                             Math.max(0, frame.getBottom() - viewport + dp(8)));
-            page.smoothScrollTo(0, target);
+            scroller.smoothScrollTo(0, target);
         });
     }
 
