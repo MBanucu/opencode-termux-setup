@@ -14,11 +14,18 @@ into that video. Nothing is extracted while the tests run; this script is the
 ``--all`` takes a frame at every milestone, ``--names a,b`` picks a few, and
 ``--at`` takes explicit seconds. Frames are PNGs named after the second they were
 taken at, or after the milestone when one matches.
+
+``idle`` answers the other question a recording can be asked - where nothing on
+screen moved - by subtracting the video from itself:
+
+    python3 test/frames.py idle --recording test/recordings/1712345678.mp4 \\
+        --milestones test/recordings/1712345678.json
 """
 
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -64,6 +71,78 @@ def extract(recording, at, out_dir, name):
     return target
 
 
+def idle_spans(recording, threshold, minimum, fps):
+    """The spans of the video in which the picture did not change.
+
+    The video is subtracted from itself: every sampled frame has the one before
+    it removed (``tblend``) and the mean difference in luma is read back
+    (``signalstats``). A still screen scores a few hundredths, a terminal that is
+    writing scores tens to hundreds, so the threshold sits in the gap between the
+    two rather than in either crowd.
+    """
+    command = [
+        ffmpeg(), "-hide_banner", "-nostats", "-loglevel", "error",
+        "-i", recording,
+        "-vf", "fps=%d,scale=240:-2,tblend=all_mode=difference,signalstats,"
+               "metadata=print:key=lavfi.signalstats.YAVG:file=-" % fps,
+        "-f", "null", "-",
+    ]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.exit("ffmpeg failed to read the recording: " + result.stderr.strip())
+
+    series = []
+    at = None
+    for line in result.stdout.splitlines():
+        header = re.match(r"frame:\d+\s+pts:\d+\s+pts_time:([0-9.]+)", line)
+        if header:
+            at = float(header.group(1))
+            continue
+        value = re.match(r"lavfi\.signalstats\.YAVG=([0-9.]+)", line)
+        if value and at is not None:
+            series.append((at, float(value.group(1))))
+
+    step = 1.0 / fps
+    spans = []
+    start = None
+    end = None
+    for at, difference in series:
+        if difference < threshold:
+            start = at - step if start is None else start
+            end = at
+        elif start is not None:
+            spans.append((start, end))
+            start = None
+    if start is not None:
+        spans.append((start, end))
+    return series, [(one, two) for one, two in spans if two - one >= minimum]
+
+
+def where(at, moments):
+    """What was on screen at that second, said with the milestones around it."""
+    before = [moment for moment in moments if moment["seconds"] <= at]
+    after = [moment for moment in moments if moment["seconds"] > at]
+    label = "after " + before[-1]["name"] if before else "before the first milestone"
+    if after:
+        label += ", before " + after[0]["name"]
+    return label
+
+
+def report_idle(recording, moments, threshold, minimum, fps):
+    series, spans = idle_spans(recording, threshold, minimum, fps)
+    length = series[-1][0] if series else 0.0
+    print("  recording: %s" % recording)
+    print("  %d frames at %d fps, still for at least %.1fs, mean difference below %.2f"
+          % (len(series), fps, minimum, threshold))
+    for start, end in spans:
+        print("  %7.2f-%7.2fs  %5.2fs  %s"
+              % (start, end, end - start, where(start, moments)))
+    idle = sum(end - start for start, end in spans)
+    if length:
+        print("  %.1fs still of %.1fs (%.0f%%) in %d span(s)"
+              % (idle, length, 100.0 * idle / length, len(spans)))
+
+
 def frame_name(moment):
     """A file name that says which moment it is, without collisions."""
     name = moment.get("name")
@@ -88,6 +167,15 @@ def main():
     frame.add_argument("--at", help="comma separated seconds")
     frame.add_argument("--out", required=True)
 
+    still = sub.add_parser("idle", help="list the spans where the screen did not change")
+    still.add_argument("--recording", required=True)
+    still.add_argument("--milestones", help="sidecar written by the suite, to name the spans")
+    still.add_argument("--threshold", type=float, default=1.0,
+                       help="mean luma difference below which a frame counts as still")
+    still.add_argument("--min", dest="minimum", type=float, default=1.5,
+                       help="shortest span to report, in seconds")
+    still.add_argument("--fps", type=int, default=2, help="frames compared per second")
+
     args = parser.parse_args()
 
     if args.command == "list":
@@ -97,6 +185,14 @@ def main():
             return
         for moment in milestones:
             print("  %7.2fs  %s" % (moment["seconds"], moment["name"]))
+        return
+
+    if args.command == "idle":
+        if not os.path.isfile(args.recording):
+            sys.exit("no such recording: " + args.recording)
+        report_idle(args.recording,
+                    load_milestones(args.milestones) if args.milestones else [],
+                    args.threshold, args.minimum, args.fps)
         return
 
     if not os.path.isfile(args.recording):
