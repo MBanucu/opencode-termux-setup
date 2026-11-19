@@ -62,20 +62,28 @@ current_code=$(sed -n 's/^CurrentVersionCode: \(.*\)/\1/p' "$yml" | head -1)
     pass "CurrentVersionCode == $code" ||
     fail "CurrentVersionCode '$current_code' != '$code'"
 
-echo "release tag"
+echo "release commit"
+# fdroiddata wants the full hash here, not a tag, so accept either and check the
+# one that is present: a hash must resolve in this repository, a tag must exist.
 commit_ref=$(sed -n '/^Builds:/,/^[A-Z]/s/^ *commit: \(.*\)/\1/p' "$yml" | head -1)
-case "$commit_ref" in
-    android-v*) ;;
-    *) fail "Builds.commit '$commit_ref' is not an android-v* tag" ;;
-esac
 if git -C "$root" rev-parse --git-dir >/dev/null 2>&1; then
-    if [ -n "$(git -C "$root" tag -l "$commit_ref")" ]; then
-        pass "tag $commit_ref exists"
-    else
-        fail "tag $commit_ref does not exist (git tag $commit_ref)"
-    fi
+    case "$commit_ref" in
+        android-v*)
+            if [ -n "$(git -C "$root" tag -l "$commit_ref")" ]; then
+                pass "tag $commit_ref exists"
+            else
+                fail "tag $commit_ref does not exist (git tag $commit_ref)"
+            fi ;;
+        *)
+            if printf '%s' "$commit_ref" | grep -qE '^[0-9a-f]{40}$' &&
+                git -C "$root" cat-file -e "$commit_ref^{commit}" 2>/dev/null; then
+                pass "commit ${commit_ref:0:8} exists (full hash, as fdroiddata asks)"
+            else
+                fail "Builds.commit '$commit_ref' is neither a full commit hash in this repo nor an android-v* tag"
+            fi ;;
+    esac
 else
-    skip "not a git checkout; cannot verify tag $commit_ref"
+    skip "not a git checkout; cannot verify commit $commit_ref"
 fi
 
 echo "recipe fields fdroiddata's CI requires"
