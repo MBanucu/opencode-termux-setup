@@ -361,7 +361,6 @@ public final class SetupFlowTest {
             // The app says when the page has been laid out; the wait after it is
             // for accessibility to see the actions it has just laid out.
             awaitPage(mark, "MainActivity", SHORT);
-            device.wait(Until.hasObject(By.text("Install opencode")), SHORT);
         }
         assertTrue("the app is in the foreground, with its actions in view: " + diagnosis(),
                 actionsVisible());
@@ -384,11 +383,12 @@ public final class SetupFlowTest {
      * page the accessibility tree had not reached yet moved the screen for
      * nobody, and the recording showed it as motion with no effect.
      */
-    private boolean actionsVisible() throws Exception {
-        if (!device.wait(Until.hasObject(By.text("Install opencode")), SHORT)) {
-            return false;
-        }
-        return device.hasObject(By.text("Check setup"));
+    private boolean actionsVisible() {
+        // Two lookups, no idle wait: the page has already said it is laid out,
+        // and waiting for the accessibility stream to settle on top of that cost
+        // two seconds a test.
+        return device.hasObject(By.text("Install opencode"))
+                && device.hasObject(By.text("Check setup"));
     }
 
     /** Fails at the moment output should have started, quoting what happened. */
