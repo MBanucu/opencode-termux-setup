@@ -19,7 +19,12 @@ taken at, or after the milestone when one matches.
 screen moved - by subtracting the video from itself:
 
     python3 test/frames.py idle --recording test/recordings/1712345678.mp4 \\
-        --milestones test/recordings/1712345678.json
+        --milestones test/recordings/1712345678.json --only latency
+
+Every still span is reported as either work (inside a window a test declared
+with ``TestMilestones.busy``, such as the real uninstall and install) or latency
+(the wait between an action and the page it opens). Only the second is time the
+app could save.
 """
 
 import argparse
@@ -38,10 +43,13 @@ def ffmpeg():
     return exe
 
 
-def load_milestones(path):
+def load_sidecar(path):
     with open(path) as handle:
-        data = json.load(handle)
-    return data.get("milestones", [])
+        return json.load(handle)
+
+
+def load_milestones(path):
+    return load_sidecar(path).get("milestones", [])
 
 
 def pick(milestones, names, take_all):
@@ -118,6 +126,20 @@ def idle_spans(recording, threshold, minimum, fps):
     return series, [(one, two) for one, two in spans if two - one >= minimum]
 
 
+def work_of(span, busy):
+    """The declared window a still span sits in, if it sits in one.
+
+    A download or a removal is the app waiting on something it does not control:
+    the screen is still, but the time is not the app's to save. Everything else
+    that is still is a wait between an action and the page it opens.
+    """
+    middle = (span[0] + span[1]) / 2
+    for window in busy:
+        if window["start"] <= middle <= window["end"]:
+            return window["name"]
+    return None
+
+
 def where(at, moments):
     """What was on screen at that second, said with the milestones around it."""
     before = [moment for moment in moments if moment["seconds"] <= at]
@@ -128,19 +150,31 @@ def where(at, moments):
     return label
 
 
-def report_idle(recording, moments, threshold, minimum, fps):
+def report_idle(recording, moments, busy, threshold, minimum, fps, only):
     series, spans = idle_spans(recording, threshold, minimum, fps)
     length = series[-1][0] if series else 0.0
     print("  recording: %s" % recording)
     print("  %d frames at %d fps, still for at least %.1fs, mean difference below %.2f"
           % (len(series), fps, minimum, threshold))
-    for start, end in spans:
-        print("  %7.2f-%7.2fs  %5.2fs  %s"
-              % (start, end, end - start, where(start, moments)))
-    idle = sum(end - start for start, end in spans)
-    if length:
-        print("  %.1fs still of %.1fs (%.0f%%) in %d span(s)"
-              % (idle, length, 100.0 * idle / length, len(spans)))
+    rows = [(start, end, work_of((start, end), busy)) for start, end in spans]
+    for start, end, work in rows:
+        if only == "work" and not work:
+            continue
+        if only == "latency" and work:
+            continue
+        kind = ("work: " + work) if work else "latency"
+        # The middle, not the start: a span that straddles a milestone belongs to
+        # the side it mostly sits on.
+        print("  %7.2f-%7.2fs  %5.2fs  %-22s %s"
+              % (start, end, end - start, kind, where((start + end) / 2, moments)))
+    if not length:
+        return
+    idle = sum(end - start for start, end, _ in rows)
+    work = sum(end - start for start, end, named in rows if named)
+    print("  %.1fs still of %.1fs (%.0f%%): %.1fs work in %d span(s), %.1fs latency in %d"
+          % (idle, length, 100.0 * idle / length, work,
+             sum(1 for _, _, named in rows if named), idle - work,
+             sum(1 for _, _, named in rows if not named)))
 
 
 def frame_name(moment):
@@ -175,6 +209,8 @@ def main():
     still.add_argument("--min", dest="minimum", type=float, default=1.5,
                        help="shortest span to report, in seconds")
     still.add_argument("--fps", type=int, default=2, help="frames compared per second")
+    still.add_argument("--only", choices=("all", "work", "latency"), default="all",
+                       help="show every span, only the work, or only the waits")
 
     args = parser.parse_args()
 
@@ -190,9 +226,10 @@ def main():
     if args.command == "idle":
         if not os.path.isfile(args.recording):
             sys.exit("no such recording: " + args.recording)
-        report_idle(args.recording,
-                    load_milestones(args.milestones) if args.milestones else [],
-                    args.threshold, args.minimum, args.fps)
+        sidecar = load_sidecar(args.milestones) if args.milestones else {}
+        report_idle(args.recording, sidecar.get("milestones", []),
+                    sidecar.get("busy", []), args.threshold, args.minimum,
+                    args.fps, args.only)
         return
 
     if not os.path.isfile(args.recording):

@@ -13,6 +13,7 @@ import androidx.test.uiautomator.UiObject2;
 import androidx.test.uiautomator.Until;
 
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.FixMethodOrder;
 import org.junit.Rule;
 import org.junit.Test;
@@ -94,10 +95,19 @@ public final class SetupFlowTest {
     @Rule
     public final TestTimings timings = new TestTimings();
 
+    /**
+     * Once for the class, not once per test: a shell round trip per method was
+     * several seconds over the run, and the grant does not change in between.
+     */
+    @BeforeClass
+    public static void grantThePermission() throws Exception {
+        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+                .executeShellCommand("pm grant " + PACKAGE + " " + PERMISSION);
+    }
+
     @Before
     public void openApp() throws Exception {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
-        device.executeShellCommand("pm grant " + PACKAGE + " " + PERMISSION);
         bringToFront();
     }
 
@@ -222,10 +232,14 @@ public final class SetupFlowTest {
         assertFalse("the Termux window was not brought forward",
                 device.hasObject(By.pkg(TERMUX)));
         milestone("uninstall-started");
-        assertStreamed("the page shows Termux's output while the removal is still running");
-        // Ask only once the removal is over: a check sent while it runs answers
-        // with the old state, and the two results race in last-result.txt.
-        waitForResult(STALL);
+        // A still screen from here to the end of the block is the filesystem
+        // working, not the app hesitating: the harness reports it as work.
+        try (TestMilestones.Busy ignored = TestMilestones.busy("uninstall")) {
+            assertStreamed("the page shows Termux's output while the removal is still running");
+            // Ask only once the removal is over: a check sent while it runs answers
+            // with the old state, and the two results race in last-result.txt.
+            waitForResult(STALL);
+        }
 
         String report = checkUntil(CHECK_REMOVED, 60_000);
         assertTrue("the check that reported the removal ran in the app: " + report,
@@ -272,8 +286,10 @@ public final class SetupFlowTest {
         assertFalse("the Termux window was not brought forward",
                 device.hasObject(By.pkg(TERMUX)));
         milestone("install-started");
-        assertStreamed("the page shows the install as it happens, not only at the end");
-        waitForResult(STALL);
+        try (TestMilestones.Busy ignored = TestMilestones.busy("install")) {
+            assertStreamed("the page shows the install as it happens, not only at the end");
+            waitForResult(STALL);
+        }
 
         String report = checkUntil(CHECK_INSTALLED, 60_000);
         assertTrue("the check that reported the version ran in the app: " + report,

@@ -110,11 +110,15 @@ stop_estimates() {
 # runs and recording afterwards what each test actually took. The result is
 # judged by the caller from the runner's own output.
 run_phase() {
-    local class=$1 log=$2
+    local class=$1 log=$2 label=${3:-$1} started
     start_estimates "$class"
+    started=$(date +%s)
     adb shell am instrument -w -e class "$class" -e runId "$run_id" "$runner" \
         | tee "$log" || true
     stop_estimates
+    # What the phase cost, so the quiet stretches in the recording have a number
+    # next to them instead of only a span.
+    echo "  $label in $(( $(date +%s) - started ))s"
     if $timing; then
         python3 "$timings" record --log "$timing_log" --run "$run_id" --db "$timings_db" \
             || true
@@ -145,8 +149,9 @@ start_recording() {
     adb logcat -c >/dev/null 2>&1 || true
     adb logcat -s OpencodeSetup:I > "$milestone_log" 2>/dev/null &
     milestone_pid=$!
-    # 720x1560 keeps the file small enough to share while still readable.
-    adb shell screenrecord --size 720x1560 --bit-rate 4M --time-limit 900 \
+    # 720x1560 at 2M keeps the file small enough to pull and share; the suite is
+    # mostly still UI, which is what H.264 spends the least on.
+    adb shell screenrecord --size 720x1560 --bit-rate 2M --time-limit 900 \
         /data/local/tmp/suite.mp4 >/dev/null 2>&1 &
     echo "recording to $recording"
 }
@@ -157,7 +162,12 @@ stop_recording() {
     recording=""
     recording_saved=$saved
     adb shell "pkill -INT screenrecord" >/dev/null 2>&1 || true
-    sleep 2
+    # screenrecord finalises the file when it gets SIGINT; pull as soon as the
+    # process is gone instead of after a guessed pause.
+    for _ in $(seq 1 25); do
+        adb shell "pidof screenrecord" >/dev/null 2>&1 || break
+        sleep 0.2
+    done
     adb pull /data/local/tmp/suite.mp4 "$saved" >/dev/null 2>&1 || true
     [ -n "$milestone_pid" ] && kill "$milestone_pid" >/dev/null 2>&1 || true
     milestone_pid=""
@@ -165,20 +175,28 @@ stop_recording() {
 import json, os, re, sys
 
 recording, start, log = sys.argv[1], float(sys.argv[2]), sys.argv[3]
-milestones = []
+milestones, busies, opened = [], [], {}
 if os.path.isfile(log):
     for line in open(log, errors="replace"):
-        found = re.search(r"milestone:(\S+) uptime:(\d+)", line)
-        if found:
-            milestones.append({
-                "name": found.group(1),
-                "seconds": round((int(found.group(2)) - start * 1000) / 1000, 2),
-            })
+        found = re.search(r"(milestone|busy-start|busy-end):(\S+) uptime:(\d+)", line)
+        if not found:
+            continue
+        kind, name = found.group(1), found.group(2)
+        at = (int(found.group(3)) - start * 1000) / 1000
+        if kind == "milestone":
+            milestones.append({"name": name, "seconds": round(at, 2)})
+        elif kind == "busy-start":
+            opened[name] = at
+        elif name in opened:
+            busies.append({"name": name, "start": round(opened.pop(name), 2),
+                           "end": round(at, 2)})
 sidecar = os.path.splitext(recording)[0] + ".json"
 json.dump({"recording": os.path.basename(recording),
            "startUptime": start,
-           "milestones": milestones}, open(sidecar, "w"), indent=2)
-print("  %d milestone(s) -> %s" % (len(milestones), sidecar))
+           "milestones": milestones,
+           "busy": busies}, open(sidecar, "w"), indent=2)
+print("  %d milestone(s), %d declared busy span(s) -> %s"
+      % (len(milestones), len(busies), sidecar))
 PY
     # A faststart MP4 plays while it is still being downloaded, which is the
     # difference between a streamable file and one that has to arrive first.
@@ -219,30 +237,24 @@ fi
 run_phase "$pkg.SetupFlowTest" "$setup_log"
 grep -q 'OK (6 tests)' "$setup_log" || { echo "setup flow FAILED" >&2; exit 1; }
 
-echo "== terminal heights (last line fits at each) =="
-height_log=$(mktemp)
-run_phase "$pkg.TerminalHeightTest" "$height_log"
-grep -q 'OK (1 test)' "$height_log" || { echo "terminal height test FAILED" >&2; exit 1; }
-
-echo "== PTY size (the terminal's width reaches Termux) =="
-# A progress line that redraws itself with a carriage return is formatted to the
-# PTY's width. At script's 80x24 default it wraps on a phone terminal and leaves
-# the previous fragment behind, so the app resizes the PTY to the emulator's own
-# columns and reports both numbers in events.log, which this test waits for.
-pty_log=$(mktemp)
-run_phase "$pkg.PtySizeTest" "$pty_log"
-grep -q 'OK (1 test)' "$pty_log" || { echo "PTY size test FAILED" >&2; exit 1; }
-
-echo "== PTY rendering (carriage returns, escapes, wrapping) =="
-# Raw bytes are written into the real terminal page and the screen it publishes
-# is asserted: a carriage return must overwrite, SGR must not print, ESC[2K must
-# erase, a backspace must step back, and a line longer than the terminal must
-# wrap - including the multi-line cases: cursor-up rewriting, clearing the whole
-# screen, scrolling past the screen, and a carriage return after a wrap. One case
-# per class method, ten in all.
-pty_render_log=$(mktemp)
-run_phase "$pkg.PtyRenderingTest" "$pty_render_log"
-grep -q 'OK (10 tests)' "$pty_render_log" || { echo "PTY rendering tests FAILED" >&2; exit 1; }
+echo "== terminal behaviour (heights, PTY size, rendering) =="
+# Three classes in one instrumentation run: each start costs a couple of seconds
+# and none of them needs the app in a different state.
+#   heights - the last line fits at each of three heights.
+#   size - a progress line that redraws itself with a carriage return is
+#     formatted to the PTY's width. At script's 80x24 default it wraps on a
+#     phone terminal and leaves the previous fragment behind, so the app makes
+#     the PTY the emulator's own columns and reports both numbers in events.log.
+#   rendering - raw bytes are written into the real terminal page and the screen
+#     it publishes is asserted: a carriage return must overwrite, SGR must not
+#     print, ESC[2K must erase, a backspace must step back, and a line longer
+#     than the terminal must wrap - including cursor-up rewriting, clearing the
+#     whole screen, scrolling past the screen, and a carriage return after a
+#     wrap. One case per class method, ten in all.
+terminal_log=$(mktemp)
+run_phase "$pkg.TerminalHeightTest,$pkg.PtySizeTest,$pkg.PtyRenderingTest" \
+    "$terminal_log" "terminal behaviour"
+grep -q 'OK (12 tests)' "$terminal_log" || { echo "terminal behaviour tests FAILED" >&2; exit 1; }
 
 echo "== denial path (permission revoked, separate run) =="
 # Revoking a dangerous permission kills the target process, hence a second run.
