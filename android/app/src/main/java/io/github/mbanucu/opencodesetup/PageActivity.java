@@ -19,6 +19,7 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
@@ -71,6 +72,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     protected LinearLayout column;
 
     private TextView notice;
+    private TextView headerTitle;
     private Button noticeAction;
     private ScrollView page;
     private WebView output;
@@ -195,6 +197,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
         header.addView(heading, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        headerTitle = heading;
         root.addView(header);
 
         column = root;
@@ -230,6 +233,51 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             terminalFrame.setVisibility(View.VISIBLE);
             terminalFrame.post(() -> script("fitNow()"));
         }
+    }
+
+    /** Replaces the header title of a terminal page that is being reused. */
+    protected void retitle(CharSequence title) {
+        if (headerTitle != null) {
+            headerTitle.setText(title);
+        }
+    }
+
+    /**
+     * Resizes the terminal to the height pinned in the page's current intent.
+     *
+     * <p>A test that measures several heights hands over a new intent instead of
+     * a new activity, so the existing frame is resized and re-fitted; creating
+     * the page again was what tore the task down between cases.
+     */
+    protected void pinTerminalHeight() {
+        View frame = terminalFrame;
+        if (frame == null) {
+            return;
+        }
+        float fraction = getIntent() == null
+                ? 0f : getIntent().getFloatExtra("terminal_fraction", 0f);
+        if (fraction <= 0f) {
+            return;
+        }
+        ViewGroup.LayoutParams params = frame.getLayoutParams();
+        params.height = Math.max(dp(120),
+                Math.round(getResources().getDisplayMetrics().heightPixels * fraction));
+        frame.setLayoutParams(params);
+        frame.post(() -> script("fitNow()"));
+    }
+
+    /** Empties the terminal so a probe or a filler starts from a clean screen. */
+    protected void clearTerminal() {
+        fillerDone = false;
+        script("resetTerm()");
+    }
+
+    /** Drops the command this page is showing, so a new intent can take its place. */
+    protected void abandonCommand() {
+        pendingSend = null;
+        stopListening();
+        running(false);
+        RunCommandReceiver.setListener(listensForResults() ? this : null);
     }
 
     @Override

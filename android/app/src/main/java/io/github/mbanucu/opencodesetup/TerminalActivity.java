@@ -49,6 +49,47 @@ public final class TerminalActivity extends PageActivity {
                 && opener.getIntExtra("filler_lines", 0) <= 0;
     }
 
+    /**
+     * Takes over the page for a test's next case.
+     *
+     * <p>The tests start each case on top of this page instead of clearing the
+     * task, so the terminal, its window and the task all survive: the new probe
+     * or height arrives here. Anything the page was showing before - a command
+     * still streaming, its result listener, the previous screen - is dropped
+     * first, because the new case is about to read what it writes.
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent == null) {
+            return;
+        }
+        setIntent(intent);
+        abandonCommand();
+        CharSequence title = intent.getCharSequenceExtra(EXTRA_TITLE);
+        retitle(title == null ? getString(R.string.app_name) : title);
+        pinTerminalHeight();
+
+        String probe = intent.getStringExtra(EXTRA_PROBE);
+        if (probe != null) {
+            clearTerminal();
+            writeProbeToTerminal(probe);
+            return;
+        }
+        int filler = intent.getIntExtra("filler_lines", 0);
+        if (filler > 0) {
+            clearTerminal();
+            fillTerminal(filler);
+            return;
+        }
+        String command = intent.getStringExtra(EXTRA_COMMAND);
+        if (command != null) {
+            runCommand(command,
+                    String.valueOf(intent.getStringExtra(EXTRA_LABEL)),
+                    String.valueOf(intent.getStringExtra(EXTRA_DESCRIPTION)));
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);

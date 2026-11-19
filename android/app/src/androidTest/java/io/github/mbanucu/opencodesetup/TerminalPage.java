@@ -16,6 +16,10 @@ import android.content.Intent;
  * <p>Every page publishes its screen to {@code live-output.txt} unless told
  * otherwise, so the caller names its own file: two pages that overlapped would
  * otherwise be read as one.
+ *
+ * <p>The page is reused when it is already on top. A case hands the next probe
+ * or height to the page that is already there, so the task is never torn down -
+ * which is what used to flash the home screen or Termux between cases.
  */
 final class TerminalPage {
 
@@ -26,6 +30,6 @@ final class TerminalPage {
     static Intent opening(Context context, String screenFile) {
         return new Intent(context, TerminalActivity.class)
                 .putExtra("screen_file", screenFile)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
     }
 }
