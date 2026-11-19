@@ -19,9 +19,10 @@ That output is live and it looks like Termux. The command runs under a pseudo
 terminal (`script`, when Termux has it), so apt draws its progress bar and colours
 programs emit are really produced; the bytes are copied to the app over a
 loopback socket while the command runs, so the page fills as apt works rather
-than when it exits. The box on the page interprets them - `\r` rewrites its line,
-SGR becomes colour and bold, other escapes are dropped - so what you see is what
-the Termux window would show, not a wall of escape codes.
+than when it exits. The bytes go, unchanged, into [xterm.js](https://xtermjs.org)
+inside a WebView: the emulator that reads them is the one every browser terminal
+uses, so `\r`, SGR colour, wrapping, cursor movement and scrollback behave as in
+the Termux window instead of depending on this app's own escape parsing.
 
 "Uninstall opencode" opens a page instead of a dialog, because removing the
 package and deleting the user's data are very different outcomes. The page
@@ -45,8 +46,11 @@ the latest release.
 
 ## Constraints kept from the reference app
 
-- **No dependencies.** No AndroidX, no networking, no analytics — four small
-  activities plus one `BroadcastReceiver`, so `assembleDebug` needs only the SDK.
+- **No libraries to resolve.** No AndroidX, no networking, no analytics — four
+  small activities plus one `BroadcastReceiver`, so `assembleDebug` needs only the
+  SDK. The terminal is xterm.js 5.5.0 (MIT), vendored under `app/src/main/assets/`
+  with its licence and loaded from `file:///android_asset`; the WebView has
+  network loads blocked and never leaves that asset.
 - **One permission**, `com.termux.permission.RUN_COMMAND`, owned by Termux. It is
   requested at the moment of use, and a denial is explained instead of retried.
 - **`allow-external-apps=true`** must be set in `~/.termux/termux.properties`; if
@@ -131,7 +135,7 @@ under the user's own shell.
 
 ```
 app/src/main/java/io/github/mbanucu/opencodesetup/
-  PageActivity.java       # shared page: text, inline notice, Termux output box
+  PageActivity.java       # shared page: text, inline notice, xterm.js terminal
   MainActivity.java       # the four actions and the check output
   InstallActivity.java    # consent page, prints the install output
   UninstallActivity.java  # keep-or-delete page, one command per choice
@@ -139,5 +143,6 @@ app/src/main/java/io/github/mbanucu/opencodesetup/
   Commands.java           # the command strings, defined once
   TermuxCommands.java     # the single place that builds a RUN_COMMAND intent
   RunCommandReceiver.java # parses Termux's result bundle
+app/src/main/assets/      # terminal.html and the vendored xterm.js (MIT)
 app/src/main/res/values/  # strings (all user-facing text), theme
 ```

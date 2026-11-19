@@ -143,7 +143,7 @@ dpkg --configure -a
 
 ## Credits
 
-The packaging work belongs to [bd-loser/opencode-bionic](https://github.com/bd-loser/opencode-bionic) (MIT). OpenCode itself is [anomalyco/opencode](https://github.com/anomalyco/opencode) (MIT). This repo only documents and automates the install for this device.
+The packaging work belongs to [bd-loser/opencode-bionic](https://github.com/bd-loser/opencode-bionic) (MIT). OpenCode itself is [anomalyco/opencode](https://github.com/anomalyco/opencode) (MIT). The app's terminal is [xterm.js](https://xtermjs.org) 5.5.0 with the fit addon, vendored under `android/app/src/main/assets/xterm/` (MIT). This repo only documents and automates the install for this device.
 
 ## Licence
 

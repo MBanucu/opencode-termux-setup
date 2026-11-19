@@ -1,5 +1,6 @@
 package io.github.mbanucu.opencodesetup;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -11,9 +12,15 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
 import android.util.Log;
 import android.util.TypedValue;
+import android.view.MotionEvent;
 import android.view.View;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -26,9 +33,11 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 /**
- * A page of this app: a column of text, a monospace box for Termux output and a
+ * A page of this app: a column of text, a terminal for Termux output and a
  * place for problems.
  *
  * <p>Every screen extends it, so the output of the command a page starts is
@@ -37,6 +46,10 @@ import java.nio.charset.StandardCharsets;
  * Termux window. Results arrive from Termux through {@link RunCommandReceiver}
  * while the page is resumed, and a result that
  * arrives while another page is on top is handed over on the next resume.
+ *
+ * <p>The terminal is xterm.js, bundled in {@code assets/terminal.html}. It is
+ * given the PTY's bytes unchanged, so wrapping, colours, cursor movement and
+ * scrollback are the work of the emulator rather than of this file.
  *
  * <p>Nothing here is a dialog: consent, failures and the refusal notice are all
  * part of the page, so there is no overlay to dismiss before reading what
@@ -51,14 +64,13 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
 
     private TextView notice;
     private Button noticeAction;
-    private TextView output;
-    private Runnable pending;
     private ScrollView page;
-    private ScrollView outputScroll;
-    private Terminal terminal;
+    private WebView output;
+    private volatile boolean outputLoaded;
+    private final Deque<String> waitingScripts = new ArrayDeque<>();
+    private Runnable pending;
     private volatile Live live;
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private boolean renderQueued;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -92,6 +104,11 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     @Override
     protected void onDestroy() {
         stopListening();
+        if (output != null) {
+            column.removeView(output);
+            output.destroy();
+            output = null;
+        }
         super.onDestroy();
     }
 
@@ -142,30 +159,64 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     }
 
     /**
-     * The terminal this page prints Termux output into: dark, monospace, and a
-     * fixed height, so a long install scrolls inside it instead of pushing the
-     * page around while it fills up.
+     * The terminal this page prints Termux output into: the xterm.js emulator
+     * loaded from the app's own assets, dark, and a fixed height so a long
+     * install scrolls inside it instead of pushing the page around. The page
+     * never navigates anywhere and the contents are never fetched from a
+     * network, so the WebView is only a canvas for that asset.
      */
-    protected TextView outputBox() {
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
+    protected WebView outputBox() {
         if (output == null) {
-            terminal = new Terminal();
+            WebView web = new WebView(this);
+            web.setId(R.id.output);
+            web.setBackgroundColor(0xFF101418);
 
-            output = new TextView(this);
-            output.setId(R.id.output);
-            output.setTypeface(Typeface.MONOSPACE);
-            output.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            output.setTextColor(0xFFDCDCDC);
-            output.setTextIsSelectable(true);
-            output.setPadding(dp(10), dp(10), dp(10), dp(10));
+            WebSettings settings = web.getSettings();
+            settings.setJavaScriptEnabled(true);
+            settings.setBlockNetworkLoads(true);
+            settings.setAllowContentAccess(false);
 
-            outputScroll = new ScrollView(this);
-            outputScroll.setBackgroundColor(0xFF101418);
-            outputScroll.addView(output);
-            outputScroll.setVisibility(View.GONE);
+            // The only bridge into the page: the emulator's screen text, so a
+            // screen reader and the end-to-end test can read what it shows.
+            web.addJavascriptInterface(new Screen(), "AndroidBridge");
+            web.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onPageFinished(WebView view, String url) {
+                    outputLoaded = true;
+                    while (true) {
+                        String next;
+                        synchronized (waitingScripts) {
+                            next = waitingScripts.pollFirst();
+                        }
+                        if (next == null) {
+                            break;
+                        }
+                        view.evaluateJavascript(next, null);
+                    }
+                    view.evaluateJavascript("fitNow()", null);
+                }
+            });
+
+            // A page ScrollView would otherwise steal the terminal's own scroll.
+            web.setOnTouchListener((view, event) -> {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) {
+                    view.getParent().requestDisallowInterceptTouchEvent(true);
+                } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    view.getParent().requestDisallowInterceptTouchEvent(false);
+                }
+                return false;
+            });
+
+            web.setVisibility(View.GONE);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, dp(280));
             params.topMargin = dp(12);
-            column.addView(outputScroll, params);
+            column.addView(web, params);
+
+            output = web;
+            web.loadUrl("file:///android_asset/terminal.html");
         }
         return output;
     }
@@ -217,7 +268,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
 
     /**
      * Sends one command to Termux, asking for its permission first if needed.
-     * Whatever comes back is printed in this page's output box.
+     * Whatever comes back is printed in this page's terminal.
      */
     protected void runCommand(String command, String label, String description) {
         if (checkSelfPermission(TermuxCommands.PERMISSION) != PackageManager.PERMISSION_GRANTED) {
@@ -270,14 +321,10 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     public void onCommandResult(String text) {
         Log.i(TAG, "result: " + text.replace("\n", " | "));
         stopListening();
-        TextView box = outputBox();
-        synchronized (terminal) {
-            terminal.reset();
-            terminal.append(text);
-            box.setText(terminal.render());
-        }
-        outputScroll.setVisibility(View.VISIBLE);
-        outputScroll.fullScroll(View.FOCUS_DOWN);
+        WebView box = outputBox();
+        script("resetTerm()");
+        write(text);
+        reveal(box);
     }
 
     // --- helpers -------------------------------------------------------------
@@ -311,8 +358,8 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
 
     /**
      * Opens a loopback port before the command is sent. Termux copies the PTY's
-     * output into it as the command produces it, which is what makes the box
-     * fill while apt is still working instead of only when it exits.
+     * output into it as the command produces it, which is what makes the
+     * terminal fill while apt is still working instead of only when it exits.
      */
     private Live listen() {
         stopListening();
@@ -340,45 +387,58 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             char[] buffer = new char[4096];
             int read;
             while (live == opened && (read = reader.read(buffer)) >= 0) {
-                synchronized (terminal) {
-                    terminal.append(new String(buffer, 0, read));
-                }
-                scheduleRender();
+                write(new String(buffer, 0, read));
             }
         } catch (IOException done) {
             // The command exited or the page went away; the result follows.
         }
     }
 
-    /** Redraws at most every 120 ms: a PTY can emit progress faster than a screen. */
-    private void scheduleRender() {
-        if (renderQueued) {
+    /** Hands one chunk of the PTY's output to the emulator, unchanged. */
+    private void write(String chunk) {
+        if (chunk.isEmpty()) {
             return;
         }
-        renderQueued = true;
-        ui.postDelayed(() -> {
-            renderQueued = false;
-            if (output == null) {
-                return;
+        String encoded = Base64.encodeToString(
+                chunk.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+        script("writeB64('" + encoded + "')");
+    }
+
+    /**
+     * Runs a script in the terminal page. Before the asset has loaded the calls
+     * are queued, so output that arrives early is not lost.
+     */
+    private void script(String javascript) {
+        if (!outputLoaded) {
+            synchronized (waitingScripts) {
+                waitingScripts.add(javascript);
             }
-            synchronized (terminal) {
-                output.setText(terminal.render());
-            }
-            outputScroll.fullScroll(View.FOCUS_DOWN);
-        }, 120);
+            return;
+        }
+        WebView box = output;
+        if (box == null) {
+            return;
+        }
+        box.post(() -> box.evaluateJavascript(javascript, null));
+    }
+
+    private void reveal(WebView box) {
+        box.setVisibility(View.VISIBLE);
+        box.post(() -> {
+            script("fitNow()");
+            // A long page can put the terminal below the fold; bring it into
+            // view so the output is seen as it arrives.
+            page.smoothScrollTo(0, box.getTop());
+        });
     }
 
     private void startOutput() {
-        TextView box = outputBox();
-        synchronized (terminal) {
-            terminal.reset();
-            box.setText(R.string.output_waiting);
-        }
-        outputScroll.setVisibility(View.VISIBLE);
-        outputScroll.fullScroll(View.FOCUS_DOWN);
-        // A long page can put the terminal below the fold; bring it into view so
-        // the output is seen as it arrives instead of after scrolling.
-        outputScroll.post(() -> page.smoothScrollTo(0, outputScroll.getTop()));
+        WebView box = outputBox();
+        script("resetTerm()");
+        String waiting = getString(R.string.output_waiting);
+        script("waitingB64('" + Base64.encodeToString(
+                waiting.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP) + "')");
+        reveal(box);
     }
 
     private void stopListening() {
@@ -391,6 +451,18 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             opened.socket.close();
         } catch (IOException ignored) {
             // Already closed.
+        }
+    }
+
+    /** Carries the emulator's screen text back out of the WebView. */
+    private final class Screen {
+        @JavascriptInterface
+        public void onScreen(String text) {
+            ui.post(() -> {
+                if (output != null) {
+                    output.setContentDescription(text);
+                }
+            });
         }
     }
 

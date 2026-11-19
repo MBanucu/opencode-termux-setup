@@ -310,8 +310,8 @@ public final class SetupFlowTest {
 
     /** The last result the app received from Termux, or null before the first. */
     private String resultText() {
-        UiObject2 node = device.findObject(By.textContains("exit code"));
-        return node == null ? null : node.getText();
+        UiObject2 node = device.findObject(By.descContains("exit code"));
+        return node == null ? null : node.getContentDescription();
     }
 
     /**
@@ -324,7 +324,9 @@ public final class SetupFlowTest {
         while (System.currentTimeMillis() < deadline) {
             UiObject2 box = device.findObject(By.res(PACKAGE, "output"));
             if (box != null) {
-                String text = box.getText();
+                // The box is a WebView running xterm.js, so its screen text is
+                // published as the node's content description.
+                String text = box.getContentDescription();
                 if (text != null && !text.trim().isEmpty()
                         && !text.startsWith(WAITING) && !text.contains("exit code")) {
                     return text;
@@ -348,10 +350,10 @@ public final class SetupFlowTest {
         check.click();
 
         if (before != null) {
-            device.wait(Until.gone(By.text(before)), POLL);
+            device.wait(Until.gone(By.desc(before)), POLL);
         }
-        UiObject2 result = device.wait(Until.findObject(By.textContains("exit code")), POLL);
-        return result == null ? null : result.getText();
+        UiObject2 result = device.wait(Until.findObject(By.descContains("exit code")), POLL);
+        return result == null ? null : result.getContentDescription();
     }
 
     /**

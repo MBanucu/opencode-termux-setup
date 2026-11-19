@@ -83,7 +83,10 @@ reports `opencode --version` back.
 
 - Source: https://github.com/MBanucu/opencode-termux-setup (GPL-3.0-or-later), subdir `android`
 - Build: `gradle`, wrapper 8.9, AGP 8.7.3, compileSdk 35, minSdk 24, JDK 17
-- No dependencies in the APK; the app is one Activity and one BroadcastReceiver
+- No library dependencies; the app is a few activities and one BroadcastReceiver
+- The terminal is xterm.js 5.5.0 (MIT), vendored under `app/src/main/assets/`
+  with its licence and loaded from `file:///android_asset`; network loads in the
+  WebView are blocked
 - No INTERNET permission: Termux performs the download the app describes
 - Reproducible release build: dependency metadata and BuildConfig are disabled,
   and CI builds `assembleRelease` twice and compares the APKs byte for byte

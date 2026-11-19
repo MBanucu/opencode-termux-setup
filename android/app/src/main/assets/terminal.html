@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<link rel="stylesheet" href="xterm/xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #101418; overflow: hidden; }
+  #screen { width: 100%; height: 100%; padding: 6px; box-sizing: border-box; }
+  .xterm .xterm-viewport { background: #101418 !important; }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<script src="xterm/xterm.js"></script>
+<script src="xterm/addon-fit.js"></script>
+<script>
+(function () {
+  // The same dark scheme the app used before, so output looks the same.
+  var term = new Terminal({
+    theme: {
+      background: '#101418', foreground: '#DCDCDC', cursor: '#DCDCDC',
+      selectionBackground: '#3A3F4B',
+      black: '#5C5C5C', red: '#E06C75', green: '#98C379', yellow: '#E5C07B',
+      blue: '#61AFEF', magenta: '#C678DD', cyan: '#56B6C2', white: '#DCDCDC',
+      brightBlack: '#7F7F7F', brightRed: '#E88B8B', brightGreen: '#B5E890',
+      brightYellow: '#F0D197', brightBlue: '#82C7FF', brightMagenta: '#D79AE8',
+      brightCyan: '#7FD6DF', brightWhite: '#FFFFFF'
+    },
+    fontFamily: 'monospace',
+    fontSize: 12,
+    cursorBlink: true,
+    // Display only: nothing is typed here, the command runs in Termux.
+    disableStdin: true,
+    scrollback: 3000
+  });
+
+  var fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('screen'));
+
+  function fitNow() {
+    try { fit.fit(); } catch (e) { /* hidden or not laid out yet */ }
+  }
+  fitNow();
+  window.addEventListener('resize', fitNow);
+
+  var waiting = false;
+
+  function bytes(base64) {
+    var binary = window.atob(base64);
+    var out = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+  }
+
+  /** One chunk of the PTY's output, exactly as Termux wrote it. */
+  window.writeB64 = function (base64) {
+    if (waiting) { term.reset(); waiting = false; }
+    term.write(bytes(base64));
+  };
+
+  /** The placeholder shown between pressing a button and the first line. */
+  window.waitingB64 = function (base64) {
+    term.reset();
+    waiting = true;
+    term.write(bytes(base64));
+  };
+
+  window.resetTerm = function () { term.reset(); waiting = false; };
+  window.fitNow = fitNow;
+
+  /** The whole scrollback as plain text, so the page's node can report it. */
+  function screenText() {
+    var buffer = term.buffer.active, lines = [], i, line;
+    for (i = 0; i < buffer.length; i++) {
+      line = buffer.getLine(i);
+      lines.push(line ? line.translateToString(true) : '');
+    }
+    while (lines.length && lines[lines.length - 1] === '') lines.pop();
+    return lines.join('\n');
+  }
+
+  var last = '';
+  setInterval(function () {
+    var text = screenText();
+    if (text !== last && window.AndroidBridge) {
+      last = text;
+      window.AndroidBridge.onScreen(text);
+    }
+  }, 250);
+})();
+</script>
+</body>
+</html>
