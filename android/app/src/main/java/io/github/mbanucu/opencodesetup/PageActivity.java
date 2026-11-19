@@ -76,6 +76,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private WebView output;
     private View terminalFrame;
     private ProgressBar busy;
+    private Button copyButton;
     private boolean outputLoaded;
     private final Deque<String> waitingScripts = new ArrayDeque<>();
     private final List<Button> actionButtons = new ArrayList<>();
@@ -307,12 +308,15 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             progressParams.bottomMargin = dp(8);
             column.addView(busy, progressParams);
 
-            Button copy = new Button(this);
-            copy.setText(R.string.copy_output);
-            copy.setAllCaps(false);
-            copy.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            copy.setOnClickListener(v -> copy(screen));
-            column.addView(copy, buttonParams());
+            // Only meaningful once there is output; hidden until then, so it
+            // does not sit on a page that has run nothing.
+            copyButton = new Button(this);
+            copyButton.setText(R.string.copy_output);
+            copyButton.setAllCaps(false);
+            copyButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            copyButton.setOnClickListener(v -> copy(screen));
+            copyButton.setVisibility(View.GONE);
+            column.addView(copyButton, buttonParams());
 
             output = web;
             web.loadUrl("file:///android_asset/terminal.html");
@@ -549,6 +553,9 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             return;
         }
         frame.setVisibility(View.VISIBLE);
+        if (copyButton != null) {
+            copyButton.setVisibility(View.VISIBLE);
+        }
         frame.post(() -> {
             script("fitNow()");
             // A long page can put the terminal below the fold; bring it into
