@@ -5,19 +5,22 @@
 
     <string name="status_termux_installed">Termux is installed.</string>
     <string name="status_termux_missing">Termux is not installed. Install it first; this app only handles setup.</string>
+    <string name="status_permission_granted">Termux permission granted.</string>
+    <string name="status_permission_missing">Termux permission not granted.</string>
 
     <string name="action_check">Check setup</string>
     <string name="action_install">Install opencode</string>
     <string name="action_uninstall">Uninstall opencode</string>
     <string name="action_open">Open Termux</string>
+    <string name="action_grant">Allow Termux commands</string>
 
     <string name="check_title">Check opencode</string>
     <string name="check_body">Runs opencode --version in Termux and prints what it answers. Nothing is installed, removed or changed.</string>
     <string name="check_action">Run check</string>
 
-    <string name="hint">Setup runs inside Termux in the background, so this screen stays in front, and every command streams its output on the page that started it.
+    <string name="hint">Setup runs inside Termux in the background, so this screen stays in front. Each command opens its own page, and Termux\'s output streams there while it runs.
 
-You may need Termux\'s \"allow external apps\" setting for this app to send commands: add allow-external-apps=true to ~/.termux/termux.properties.</string>
+If a command is refused, Termux\'s \"allow external apps\" setting must be enabled before any command can be sent: add allow-external-apps=true to ~/.termux/termux.properties.</string>
 
     <string name="output_waiting">Running in Termux…</string>
     <string name="back">Back</string>

@@ -4,6 +4,8 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
 import android.widget.TextView;
 
 /**
@@ -11,12 +13,14 @@ import android.widget.TextView;
  *
  * <p>It owns no code that installs anything: it explains the download, opens a
  * page for consent, and sends one command to Termux through RUN_COMMAND. Termux
- * stays in the background. This screen deliberately has no terminal: each command
- * prints on the page that started it.
+ * stays in the background. This screen deliberately has no terminal: a confirmed
+ * command opens its own page and prints there.
  */
 public final class MainActivity extends PageActivity {
 
     private TextView status;
+    private TextView permission;
+    private Button grant;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -24,6 +28,10 @@ public final class MainActivity extends PageActivity {
         heading(R.string.app_name);
         body(R.string.tagline);
         status = bold(R.string.status_termux_installed);
+        permission = bold(R.string.status_permission_granted);
+        // Asking here means the request lands on a page that explains it, instead
+        // of interrupting the first command halfway through.
+        grant = button(R.string.action_grant, v -> askForTermuxPermission());
 
         // The one thing the app is for gets the filled button; the rest are
         // equal-weight actions next to it.
@@ -57,6 +65,17 @@ public final class MainActivity extends PageActivity {
                 ? R.string.status_termux_installed
                 : R.string.status_termux_missing);
         status.setTextColor(installed ? 0xFF2E7D32 : 0xFFB3261E);
+
+        boolean allowed = installed
+                && checkSelfPermission(TermuxCommands.PERMISSION)
+                        == PackageManager.PERMISSION_GRANTED;
+        permission.setText(allowed
+                ? R.string.status_permission_granted
+                : R.string.status_permission_missing);
+        permission.setTextColor(allowed ? 0xFF2E7D32 : 0xFFB3261E);
+        // Without Termux installed there is no permission to hold, and asking
+        // would raise a dialog nothing can satisfy.
+        grant.setVisibility(installed && !allowed ? View.VISIBLE : View.GONE);
     }
 
     private void openTermux() {

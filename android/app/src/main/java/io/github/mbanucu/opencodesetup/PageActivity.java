@@ -49,11 +49,11 @@ import java.util.List;
  * A page of this app: a column of text, a terminal for Termux output and a
  * place for problems.
  *
- * <p>Every screen extends it, so the output of the command a page starts is
- * printed on that page - the install page shows the install, the uninstall page
- * shows the removal, the main page shows the check, and no command raises the
- * Termux window. Results arrive from Termux through {@link RunCommandReceiver}
- * while the page is resumed, and a result that
+ * <p>Every screen extends it. A page hands a confirmed command to
+ * {@link TerminalActivity}, whose page owns the terminal and prints Termux's
+ * output there - the install, the removal and the check all report on that one
+ * page, and no command raises the Termux window. Results arrive from Termux
+ * through {@link RunCommandReceiver} while the page is resumed, and a result that
  * arrives while another page is on top is handed over on the next resume.
  *
  * <p>The terminal is xterm.js, bundled in {@code assets/terminal.html}. It is
@@ -485,6 +485,16 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     }
 
     // --- running a command ---------------------------------------------------
+
+    /**
+     * Asks for Termux's RUN_COMMAND permission without sending anything, so the
+     * request can happen on the page that explains it instead of in the middle of
+     * the first command.
+     */
+    protected void askForTermuxPermission() {
+        pending = null;
+        requestPermissions(new String[] {TermuxCommands.PERMISSION}, REQUEST_RUN_COMMAND);
+    }
 
     /**
      * Sends one command to Termux, asking for its permission first if needed.
