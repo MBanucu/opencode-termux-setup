@@ -11,7 +11,11 @@
     <string name="action_uninstall">Uninstall opencode</string>
     <string name="action_open">Open Termux</string>
 
-    <string name="hint">Setup runs inside Termux in the background, so this screen stays in front, and every command streams its output here as it runs.
+    <string name="check_title">Check opencode</string>
+    <string name="check_body">Runs opencode --version in Termux and prints what it answers. Nothing is installed, removed or changed.</string>
+    <string name="check_action">Run check</string>
+
+    <string name="hint">Setup runs inside Termux in the background, so this screen stays in front, and every command streams its output on the page that started it.
 
 You may need Termux\'s \"allow external apps\" setting for this app to send commands: add allow-external-apps=true to ~/.termux/termux.properties.</string>
 

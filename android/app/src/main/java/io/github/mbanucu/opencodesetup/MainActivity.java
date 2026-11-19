@@ -11,8 +11,8 @@ import android.widget.TextView;
  *
  * <p>It owns no code that installs anything: it explains the download, opens a
  * page for consent, and sends one command to Termux through RUN_COMMAND. Termux
- * stays in the background; every state it shows comes from running
- * {@code opencode --version} in Termux and printing the answer on this page.
+ * stays in the background. This screen deliberately has no terminal: each command
+ * prints on the page that started it.
  */
 public final class MainActivity extends PageActivity {
 
@@ -31,11 +31,11 @@ public final class MainActivity extends PageActivity {
                 v -> startActivity(new Intent(this, InstallActivity.class)));
         button(R.string.action_uninstall,
                 v -> startActivity(new Intent(this, UninstallActivity.class)));
-        button(R.string.action_check, v -> runCheck());
+        button(R.string.action_check,
+                v -> startActivity(new Intent(this, CheckActivity.class)));
         button(R.string.action_open, v -> openTermux());
 
         body(R.string.hint);
-        outputBox();
     }
 
     @Override
@@ -52,13 +52,6 @@ public final class MainActivity extends PageActivity {
         status.setTextColor(installed ? 0xFF2E7D32 : 0xFFB3261E);
     }
 
-    private void runCheck() {
-        if (!requireTermux()) {
-            return;
-        }
-        runCommand(Commands.CHECK, "Check opencode", "Report the installed opencode version");
-    }
-
     private void openTermux() {
         if (!requireTermux()) {
             return;
@@ -68,12 +61,6 @@ public final class MainActivity extends PageActivity {
         if (launch != null) {
             startActivity(launch);
         }
-    }
-
-    @Override
-    public void onCommandResult(String text) {
-        super.onCommandResult(text);
-        refresh();
     }
 
     private boolean isTermuxInstalled() {

@@ -425,6 +425,13 @@ public final class SetupFlowTest {
         }
         check.click();
 
+        // The check has its own page now; the command is started from there.
+        UiObject2 run = device.wait(Until.findObject(By.text("Run check")), SHORT);
+        if (run == null) {
+            fail("the check page offers no run action: " + diagnosis());
+        }
+        run.click();
+
         String text = awaitFile(answer, value -> value.contains("exit code"), POLL);
         if (text == null) {
             fail("the check did not answer within " + (POLL / 1000) + "s. " + diagnosis());

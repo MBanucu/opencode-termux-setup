@@ -52,6 +52,10 @@ public final class PermissionDeniedTest {
     @Test
     public void asksForThePermissionAndExplainsADenial() throws Exception {
         device.findObject(By.text("Check setup")).click();
+        // The command runs from its own page now, so that is where Android asks.
+        UiObject2 run = device.wait(Until.findObject(By.text("Run check")), SHORT);
+        assertNotNull("the check page offers to run the check", run);
+        run.click();
 
         UiObject2 allow = device.wait(
                 Until.findObject(By.text(Pattern.compile("(?i)allow"))), 15_000);

@@ -70,12 +70,12 @@ public final class TerminalHeightTest {
                             + ": " + filled,
                     filled.contains("\"fits\":true"));
 
-            UiObject2 check = device.wait(Until.findObject(By.text("Check setup")), SHORT);
-            if (check == null) {
-                org.junit.Assert.fail("no check button at " + fraction + " of the screen");
+            UiObject2 run = device.wait(Until.findObject(By.text("Run check")), SHORT);
+            if (run == null) {
+                org.junit.Assert.fail("no run action at " + fraction + " of the screen");
             }
             device.executeShellCommand("logcat -c");
-            check.click();
+            run.click();
 
             // And again for the command's own output, which arrives with its own
             // line endings and progress rewrites.
@@ -106,7 +106,7 @@ public final class TerminalHeightTest {
     private void openAt(float fraction) throws Exception {
         for (int attempt = 0; attempt < 3; attempt++) {
             launch(fraction);
-            if (device.hasObject(By.text("Check setup"))) {
+            if (device.hasObject(By.text("Run check"))) {
                 Thread.sleep(500);
                 return;
             }
@@ -120,10 +120,11 @@ public final class TerminalHeightTest {
         // plain start does not guarantee - it reused the page and every height
         // came back the same. The filler makes the buffer overflow, because only
         // a full terminal puts the last line at the bottom edge.
-        device.executeShellCommand("am start -W -f 0x10008000 -n " + PACKAGE + "/.MainActivity"
+        // The check owns the terminal now, so its page is the one to pin.
+        device.executeShellCommand("am start -W -f 0x10008000 -n " + PACKAGE + "/.CheckActivity"
                 + " --ef terminal_fraction " + fraction
                 + " --ei filler_lines 300");
-        device.wait(Until.hasObject(By.text("Install opencode")), SHORT);
+        device.wait(Until.hasObject(By.text("Run check")), SHORT);
         Thread.sleep(500);
     }
 

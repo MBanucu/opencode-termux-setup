@@ -53,6 +53,13 @@
             android:exported="false"
             android:label="@string/uninstall_title" />
 
+        <!-- "Check setup" has a page of its own: the terminal that shows what
+             Termux answers belongs there, not on the start screen. Not exported. -->
+        <activity
+            android:name=".CheckActivity"
+            android:exported="false"
+            android:label="@string/check_title" />
+
         <!-- adb entry point, so every action the UI offers is scriptable:
                adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity -e command check
              It is exported because adb needs that; it sends the same Termux
