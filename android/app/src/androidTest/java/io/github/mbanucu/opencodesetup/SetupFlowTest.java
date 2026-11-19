@@ -214,8 +214,11 @@ public final class SetupFlowTest {
                 device.hasObject(By.pkg(TERMUX)));
         shot("05-uninstall-started.png");
         assertStreamed("the page shows Termux's output while the removal is still running");
+        // Ask only once the removal is over: a check sent while it runs answers
+        // with the old state, and the two results race in last-result.txt.
+        waitForResult(UNINSTALL_BUDGET);
 
-        String report = checkUntil(CHECK_REMOVED, UNINSTALL_BUDGET);
+        String report = checkUntil(CHECK_REMOVED, 60_000);
         assertTrue("the check that reported the removal ran in the app: " + report,
                 device.hasObject(By.pkg(PACKAGE)));
         shot("06-uninstalled.png");
@@ -261,8 +264,9 @@ public final class SetupFlowTest {
                 device.hasObject(By.pkg(TERMUX)));
         shot("07-install-started.png");
         assertStreamed("the page shows the install as it happens, not only at the end");
+        waitForResult(INSTALL_BUDGET);
 
-        String report = checkUntil(CHECK_INSTALLED, INSTALL_BUDGET);
+        String report = checkUntil(CHECK_INSTALLED, 60_000);
         assertTrue("the check that reported the version ran in the app: " + report,
                 device.hasObject(By.pkg(PACKAGE)));
         shot("08-installed.png");
@@ -326,7 +330,13 @@ public final class SetupFlowTest {
     private void scrollToTop() {
         int width = device.getDisplayWidth();
         int height = device.getDisplayHeight();
-        for (int swipe = 0; swipe < 3 && !device.hasObject(By.text("Check setup")); swipe++) {
+        for (int swipe = 0; swipe < 3; swipe++) {
+            // Both actions, not just the lower one: stopping when the check
+            // comes into view can leave "Install opencode" just above the edge.
+            if (device.hasObject(By.text("Install opencode"))
+                    && device.hasObject(By.text("Check setup"))) {
+                return;
+            }
             device.swipe(width / 2, height / 5, width / 2, height * 4 / 5, 20);
             device.waitForIdle();
         }
@@ -456,6 +466,25 @@ public final class SetupFlowTest {
         fail("Termux never answered " + wanted + " within " + (budget / 1000)
                 + "s; the last answer was: " + report + ". " + diagnosis());
         return report;
+    }
+
+    /**
+     * Waits for the app to log that the command it started has finished.
+     *
+     * <p>Without this the flow races against itself: a check sent while an
+     * install is still running answers with the state before it, and the
+     * installer's summary and the check's answer overwrite each other in
+     * {@code last-result.txt}.
+     */
+    private void waitForResult(long budget) throws Exception {
+        long deadline = System.currentTimeMillis() + budget;
+        while (System.currentTimeMillis() < deadline) {
+            if (device.executeShellCommand("logcat -d -s OpencodeSetup:I").contains("result: ")) {
+                return;
+            }
+            Thread.sleep(500);
+        }
+        fail("the command did not finish within " + (budget / 1000) + "s. " + diagnosis());
     }
 
     /**
