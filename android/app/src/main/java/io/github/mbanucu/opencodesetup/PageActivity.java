@@ -121,19 +121,18 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     protected void onResume() {
         super.onResume();
         RunCommandReceiver.setListener(this);
-        fillForTest();
     }
 
     /**
-     * Fills the terminal with lines when an intent asks for it.
+     * Fills this page's terminal with lines, when a test asks for it.
      *
      * <p>A clipping bug at the bottom edge only shows on a terminal that is full,
      * and the app's own commands are either two lines or a two-minute install.
      * {@code --ei filler_lines 200} makes the page write that many lines once, so
-     * the end-to-end test can measure a full terminal at any height.
+     * the end-to-end test can measure a full terminal at any height. Only pages
+     * that actually own a terminal call this.
      */
-    private void fillForTest() {
-        int lines = getIntent() == null ? 0 : getIntent().getIntExtra("filler_lines", 0);
+    protected void fillTerminal(int lines) {
         if (lines <= 0 || fillerDone) {
             return;
         }

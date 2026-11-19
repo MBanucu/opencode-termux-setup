@@ -31,8 +31,15 @@ public final class MainActivity extends PageActivity {
                 v -> startActivity(new Intent(this, InstallActivity.class)));
         button(R.string.action_uninstall,
                 v -> startActivity(new Intent(this, UninstallActivity.class)));
-        button(R.string.action_check,
-                v -> startActivity(new Intent(this, CheckActivity.class)));
+        button(R.string.action_check, v -> {
+            // The terminal-height test hooks travel with the intent, so the page
+            // that owns the terminal is the one that receives them.
+            Intent check = new Intent(this, CheckActivity.class);
+            if (getIntent() != null) {
+                check.putExtras(getIntent());
+            }
+            startActivity(check);
+        });
         button(R.string.action_open, v -> openTermux());
 
         body(R.string.hint);

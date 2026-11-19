@@ -20,6 +20,11 @@ public final class CheckActivity extends PageActivity {
         body(R.string.check_body);
         primaryButton(R.string.check_action, v -> run());
         outputBox();
+
+        int filler = getIntent() == null ? 0 : getIntent().getIntExtra("filler_lines", 0);
+        if (filler > 0) {
+            fillTerminal(filler);
+        }
     }
 
     private void run() {

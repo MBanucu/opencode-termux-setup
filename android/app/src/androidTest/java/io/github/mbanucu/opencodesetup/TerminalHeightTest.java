@@ -120,10 +120,15 @@ public final class TerminalHeightTest {
         // plain start does not guarantee - it reused the page and every height
         // came back the same. The filler makes the buffer overflow, because only
         // a full terminal puts the last line at the bottom edge.
-        // The check owns the terminal now, so its page is the one to pin.
-        device.executeShellCommand("am start -W -f 0x10008000 -n " + PACKAGE + "/.CheckActivity"
+        // Through the real path: the start page is exported and carries the hooks
+        // on to the check page, which owns the terminal.
+        device.executeShellCommand("am start -W -f 0x10008000 -n " + PACKAGE + "/.MainActivity"
                 + " --ef terminal_fraction " + fraction
                 + " --ei filler_lines 300");
+        UiObject2 open = device.wait(Until.findObject(By.text("Check setup")), SHORT);
+        if (open != null) {
+            open.click();
+        }
         device.wait(Until.hasObject(By.text("Run check")), SHORT);
         Thread.sleep(500);
     }
