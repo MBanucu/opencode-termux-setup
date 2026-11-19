@@ -144,3 +144,7 @@ dpkg --configure -a
 ## Credits
 
 The packaging work belongs to [bd-loser/opencode-bionic](https://github.com/bd-loser/opencode-bionic) (MIT). OpenCode itself is [anomalyco/opencode](https://github.com/anomalyco/opencode) (MIT). This repo only documents and automates the install for this device.
+
+## Licence
+
+This repository — `install.sh`, `uninstall.sh`, the documentation and the Android app under `android/` — is **GPL-3.0-or-later**. The full text is in [`LICENSE`](LICENSE). opencode and the packages built by bd-loser/opencode-bionic keep their own MIT licence; neither is redistributed here.

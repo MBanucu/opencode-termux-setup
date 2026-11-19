@@ -1,6 +1,6 @@
 Categories:
   - Development
-License: MIT
+License: GPL-3.0-or-later
 AuthorName: Michael Banucu
 SourceCode: https://github.com/MBanucu/opencode-termux-setup
 IssueTracker: https://github.com/MBanucu/opencode-termux-setup/issues
@@ -31,7 +31,7 @@ Description: |-
   background work. It talks to Termux, and only when you press a button.
 
   The installer, documentation and issue notes are at
-  https://github.com/MBanucu/opencode-termux-setup (MIT). opencode itself is MIT
+  https://github.com/MBanucu/opencode-termux-setup (GPL-3.0-or-later). opencode itself is MIT
   and is not redistributed here.
 
 RepoType: git

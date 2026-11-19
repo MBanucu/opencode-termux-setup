@@ -81,7 +81,7 @@ repository it will add (bd-loser/opencode-bionic), shows the download budget,
 asks for consent, and hands one command to Termux through RUN_COMMAND. It then
 reports `opencode --version` back.
 
-- Source: https://github.com/MBanucu/opencode-termux-setup (MIT), subdir `android`
+- Source: https://github.com/MBanucu/opencode-termux-setup (GPL-3.0-or-later), subdir `android`
 - Build: `gradle`, wrapper 8.9, AGP 8.7.3, compileSdk 35, minSdk 24, JDK 17
 - No dependencies in the APK; the app is one Activity and one BroadcastReceiver
 - No INTERNET permission: Termux performs the download the app describes
