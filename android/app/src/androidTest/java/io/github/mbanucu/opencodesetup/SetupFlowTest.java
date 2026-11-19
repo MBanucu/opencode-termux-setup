@@ -310,8 +310,26 @@ public final class SetupFlowTest {
         if (!device.hasObject(By.text("Check setup"))) {
             device.executeShellCommand("am start -W -n " + PACKAGE + "/.MainActivity");
         }
-        assertTrue("the app is in the foreground",
-                device.wait(Until.hasObject(By.text("Check setup")), 30_000));
+        scrollToTop();
+        assertTrue("the app is in the foreground, with its actions in view: " + diagnosis(),
+                device.wait(Until.hasObject(By.text("Check setup")), SHORT));
+    }
+
+    /**
+     * Scrolls the page back to the top.
+     *
+     * <p>After output arrives the page scrolls itself down to the terminal, and
+     * the actions above it then exist neither on screen nor in the accessibility
+     * tree. Pressing them means scrolling up first, exactly as a person would -
+     * otherwise the lookup is null for a page that is behaving correctly.
+     */
+    private void scrollToTop() {
+        int width = device.getDisplayWidth();
+        int height = device.getDisplayHeight();
+        for (int swipe = 0; swipe < 3 && !device.hasObject(By.text("Check setup")); swipe++) {
+            device.swipe(width / 2, height / 5, width / 2, height * 4 / 5, 20);
+            device.waitForIdle();
+        }
     }
 
     /** Fails at the moment output should have started, quoting what happened. */
