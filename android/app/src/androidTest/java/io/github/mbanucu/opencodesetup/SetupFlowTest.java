@@ -64,6 +64,8 @@ public final class SetupFlowTest {
     private static final long POLL = 12_000;
     /** The first chunk of a command that is still running. */
     private static final long STREAM = 8_000;
+    /** Between two checks while waiting for a long command to finish. */
+    private static final long RETRY = 3_000;
     /** A removal is one apt transaction, but it waits for the apt lock. */
     private static final long UNINSTALL_BUDGET = 300_000;
     /** A reinstall downloads ~70 MB, so it gets a download-sized budget. */
@@ -276,8 +278,7 @@ public final class SetupFlowTest {
      */
     @Test
     public void fAdbEndpointRunsTheSameCommands() throws Exception {
-        File result = new File(InstrumentationRegistry.getInstrumentation()
-                .getTargetContext().getExternalFilesDir(null), "last-result.txt");
+        File result = resultFile();
         assertTrue("old answer cleared", !result.exists() || result.delete());
 
         device.executeShellCommand("am start -W -n " + PACKAGE + "/.AdbCommandActivity"
@@ -370,23 +371,47 @@ public final class SetupFlowTest {
     }
 
     /**
-     * Runs "Check setup" once and waits for a result newer than the one on
-     * screen. The old node going away is the event; no sleep guesses how long a
-     * Termux command takes.
+     * Runs "Check setup" once and returns Termux's answer.
+     *
+     * <p>The new answer is observed through {@code last-result.txt}, which the
+     * receiver rewrites for every result, after the file is removed. Watching the
+     * terminal node instead is what used to stall the loop: a check run twice
+     * prints exactly the same text, so the old description never went away, the
+     * wait spent its whole timeout looking for an event that cannot happen, and
+     * the caller asked again - for ever.
      */
     private String checkOnce() throws Exception {
         bringToFront();
-        String before = resultText();
+        File answer = resultFile();
+        if (!answer.delete() && answer.exists()) {
+            fail("the last answer cannot be cleared, so a new one is unobservable: " + answer);
+        }
 
         UiObject2 check = device.wait(Until.findObject(By.text("Check setup")), SHORT);
-        assertNotNull("the check button is reachable", check);
+        if (check == null) {
+            fail("the check button is not on screen: " + diagnosis());
+        }
         check.click();
 
-        if (before != null) {
-            device.wait(Until.gone(By.desc(before)), POLL);
+        String text = awaitFile(answer, value -> value.contains("exit code"), POLL);
+        if (text == null) {
+            fail("the check did not answer within " + (POLL / 1000) + "s. " + diagnosis());
         }
-        UiObject2 result = device.wait(Until.findObject(By.descContains("exit code")), POLL);
-        return result == null ? null : result.getContentDescription();
+
+        // The terminal repaints at most once a second, so the answer has to end
+        // up on the page as well: a file the user never sees is not the feature.
+        String firstLine = text.trim().split("\n")[0].trim();
+        if (!firstLine.isEmpty()
+                && !device.wait(Until.hasObject(By.descContains(firstLine)), SHORT)) {
+            fail("Termux answered but the page does not show it: " + diagnosis());
+        }
+        return text;
+    }
+
+    /** Where the result bundle of the last command is stored. */
+    private File resultFile() {
+        return new File(InstrumentationRegistry.getInstrumentation()
+                .getTargetContext().getExternalFilesDir(null), "last-result.txt");
     }
 
     /**
@@ -403,6 +428,9 @@ public final class SetupFlowTest {
             if (report != null && wanted.matcher(report.trim()).matches()) {
                 return report;
             }
+            // A check answers in about a second; without this the button would
+            // be pressed as fast as it answers for the whole budget.
+            Thread.sleep(RETRY);
         }
         fail("Termux never answered " + wanted + " within " + (budget / 1000)
                 + "s; the last answer was: " + report + ". " + diagnosis());
