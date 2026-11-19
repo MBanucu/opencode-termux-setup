@@ -28,16 +28,21 @@ echo "== install =="
 adb install -r "$apk"
 adb install -r "$test_apk"
 
-echo "== setup flow (permission granted) =="
+# mktemp honours TMPDIR: Termux has no writable /tmp, so a hard-coded path made
+# tee fail and took the whole run down before the second class.
+setup_log=$(mktemp)
+
+ echo "== setup flow (permission granted) =="
 adb shell "pm grant $pkg com.termux.permission.RUN_COMMAND" || true
-adb shell am instrument -w -e class "$pkg.SetupFlowTest" "$runner" | tee /tmp/setup-flow.txt
-grep -q 'OK (3 tests)' /tmp/setup-flow.txt || { echo "setup flow FAILED" >&2; exit 1; }
+adb shell am instrument -w -e class "$pkg.SetupFlowTest" "$runner" | tee "$setup_log"
+grep -q 'OK (3 tests)' "$setup_log" || { echo "setup flow FAILED" >&2; exit 1; }
 
 echo "== denial path (permission revoked, separate run) =="
 # Revoking a dangerous permission kills the target process, hence a second run.
 adb shell "pm revoke $pkg com.termux.permission.RUN_COMMAND" || true
-adb shell am instrument -w -e class "$pkg.PermissionDeniedTest" "$runner" | tee /tmp/denied.txt
-grep -q 'OK (1 test)' /tmp/denied.txt || { echo "denial path FAILED" >&2; exit 1; }
+denied_log=$(mktemp)
+adb shell am instrument -w -e class "$pkg.PermissionDeniedTest" "$runner" | tee "$denied_log"
+grep -q 'OK (1 test)' "$denied_log" || { echo "denial path FAILED" >&2; exit 1; }
 
 echo
 echo "both runs passed"
