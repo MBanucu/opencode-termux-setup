@@ -53,12 +53,30 @@ jobs:
         working-directory: android
         run: ./gradlew --version | sed -n '1,8p'
 
+      # fdroiddata's source scanner rejects Maven hosts it does not recognise, so
+      # the mirror that used to absorb Maven Central's 429s cannot be declared.
+      # Retrying the build here is what covers that instead, and the failure is
+      # printed in full rather than swallowed by a short tail.
+      #
       # assembleDebugAndroidTest compiles the UI Automator end-to-end tests.  It
       # does not run them: that needs a device or emulator, which is what
       # test/android-e2e.sh does over adb.
       - name: Assemble
         working-directory: android
-        run: ./gradlew --no-daemon --stacktrace assembleDebug assembleDebugAndroidTest
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/assemble.log"
+          for attempt in 1 2 3; do
+            if ./gradlew --no-daemon --stacktrace assembleDebug assembleDebugAndroidTest 2>&1 | tee "$log"; then
+              exit 0
+            fi
+            echo "::warning::assemble attempt $attempt failed"
+            grep -E 'error:|429|Could not (resolve|find)|FAILURE|What went wrong' "$log" | head -15 || true
+            [ "$attempt" -lt 3 ] || break
+            sleep 20
+          done
+          echo "::error::assemble failed three times"
+          exit 1
 
       - name: Report the apk
         working-directory: android
@@ -118,14 +136,23 @@ jobs:
         run: |
           set -euo pipefail
           build() {
-            ./gradlew --no-daemon --no-build-cache --rerun-tasks clean assembleRelease \
-              2>&1 | tail -5
+            log="$RUNNER_TEMP/assemble-release-$2.log"
+            for attempt in 1 2 3; do
+              if ./gradlew --no-daemon --no-build-cache --rerun-tasks clean assembleRelease > "$log" 2>&1; then
+                tail -3 "$log"
+                break
+              fi
+              echo "::warning::assembleRelease attempt $attempt failed"
+              grep -E 'error:|429|Could not (resolve|find)|FAILURE|What went wrong' "$log" | head -15 || true
+              [ "$attempt" -lt 3 ] || { echo "::error::release build failed three times"; exit 1; }
+              sleep 20
+            done
             apk=$(ls app/build/outputs/apk/release/*.apk | head -1)
             cp "$apk" "$1"
             sha256sum "$1"
           }
-          build "$RUNNER_TEMP/first.apk"
-          build "$RUNNER_TEMP/second.apk"
+          build "$RUNNER_TEMP/first.apk" first
+          build "$RUNNER_TEMP/second.apk" second
           if cmp "$RUNNER_TEMP/first.apk" "$RUNNER_TEMP/second.apk"; then
             echo "reproducible: both builds are byte-identical"
           else
