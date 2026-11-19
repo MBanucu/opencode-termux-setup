@@ -9,17 +9,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 /**
- * Waits for a file the app writes, without polling it.
+ * Waits for a file the app writes, woken by the write rather than by a timer.
  *
- * <p>{@link FileObserver} reports writes on its own thread, so a wait ends when
- * the app writes rather than on the next tick of a timer. The directory is what
- * gets watched, because the file being waited for may not exist yet and the app
- * writes several of them side by side; an event that is not the one wanted costs
- * one re-read and nothing more.
+ * <p>{@link FileObserver} reports changes on its own thread. The directory is
+ * watched, not the file: the file may not exist yet, and the app writes several
+ * of them side by side, so an event that is not the one wanted costs one re-read.
  *
- * <p>Every wait is capped at {@link #MAX_WAIT}, so on a device whose storage
- * reports no events the condition is still re-checked instead of the whole
- * budget passing unseen.
+ * <p>Each wait blocks for at most {@link #TICK}, so a device whose storage
+ * reports no events still re-checks the condition as often as the polling this
+ * replaced - the observer is a shortcut, not a requirement.
  */
 final class FileWatcher {
 
@@ -29,8 +27,8 @@ final class FileWatcher {
             | FileObserver.MOVED_TO
             | FileObserver.ATTRIB;
 
-    /** The longest a single wait blocks before it looks at the condition again. */
-    private static final long MAX_WAIT = 500;
+    /** The longest a wait blocks before looking at the condition again. */
+    private static final long TICK = 50;
 
     private FileWatcher() {
     }
@@ -39,39 +37,64 @@ final class FileWatcher {
     static boolean await(File file, BooleanSupplier ready, long budget)
             throws InterruptedException {
         long deadline = System.currentTimeMillis() + budget;
-        while (true) {
-            if (ready.getAsBoolean()) {
-                return true;
+        if (ready.getAsBoolean()) {
+            return true;
+        }
+        AtomicReference<CountDownLatch> gate = new AtomicReference<>(new CountDownLatch(1));
+        FileObserver observer = watch(file.getParentFile(), gate);
+        if (observer != null) {
+            observer.startWatching();
+        }
+        try {
+            while (true) {
+                if (ready.getAsBoolean()) {
+                    return true;
+                }
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) {
+                    return ready.getAsBoolean();
+                }
+                upTo(gate, Math.min(left, TICK));
             }
-            long left = deadline - System.currentTimeMillis();
-            if (left <= 0) {
-                return ready.getAsBoolean();
+        } finally {
+            if (observer != null) {
+                observer.stopWatching();
             }
-            awaitChange(file, Math.min(left, MAX_WAIT));
         }
     }
 
     /** True if the file's directory changed within {@code budget}. */
     static boolean awaitChange(File file, long budget) throws InterruptedException {
-        File dir = file.getParentFile();
-        if (dir == null || !dir.isDirectory()) {
-            // Nothing to watch (the directory itself is not there yet): fall back
-            // to waiting the way a timer would.
-            Thread.sleep(Math.min(budget, MAX_WAIT));
+        AtomicReference<CountDownLatch> gate = new AtomicReference<>(new CountDownLatch(1));
+        FileObserver observer = watch(file.getParentFile(), gate);
+        if (observer == null) {
+            Thread.sleep(budget);
             return false;
         }
-        AtomicReference<CountDownLatch> gate = new AtomicReference<>(new CountDownLatch(1));
-        FileObserver observer = new FileObserver(dir.getAbsolutePath(), MASK) {
+        observer.startWatching();
+        try {
+            return upTo(gate, budget);
+        } finally {
+            observer.stopWatching();
+        }
+    }
+
+    private static FileObserver watch(File dir, AtomicReference<CountDownLatch> gate) {
+        if (dir == null || !dir.isDirectory()) {
+            return null;
+        }
+        return new FileObserver(dir.getAbsolutePath(), MASK) {
             @Override
             public void onEvent(int event, String path) {
                 gate.get().countDown();
             }
         };
-        observer.startWatching();
-        try {
-            return gate.get().await(Math.max(1, budget), TimeUnit.MILLISECONDS);
-        } finally {
-            observer.stopWatching();
-        }
+    }
+
+    private static boolean upTo(AtomicReference<CountDownLatch> gate, long budget)
+            throws InterruptedException {
+        boolean event = gate.get().await(Math.max(1, budget), TimeUnit.MILLISECONDS);
+        gate.set(new CountDownLatch(1));
+        return event;
     }
 }

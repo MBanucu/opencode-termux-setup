@@ -364,7 +364,7 @@ public final class SetupFlowTest {
             device.wait(Until.hasObject(By.text("Install opencode")), SHORT);
         }
         assertTrue("the app is in the foreground, with its actions in view: " + diagnosis(),
-                scrollToTop());
+                actionsVisible());
     }
 
     /** Waits for the app to say a page has been laid out, read from its own log. */
@@ -376,27 +376,19 @@ public final class SetupFlowTest {
     }
 
     /**
-     * Scrolls the page back to the top.
+     * True when both actions are on screen, which is what the next step needs.
      *
-     * <p>After output arrives the page scrolls itself down to the terminal, and
-     * the actions above it then exist neither on screen nor in the accessibility
-     * tree. Pressing them means scrolling up first, exactly as a person would -
-     * otherwise the lookup is null for a page that is behaving correctly.
+     * <p>Nothing here swipes any more. The swipes existed because a terminal on
+     * the same page can scroll the actions out of the hierarchy, but the main
+     * page has no terminal: its actions sit at the top of the page. A swipe at a
+     * page the accessibility tree had not reached yet moved the screen for
+     * nobody, and the recording showed it as motion with no effect.
      */
-    private boolean scrollToTop() {
-        int width = device.getDisplayWidth();
-        int height = device.getDisplayHeight();
-        for (int swipe = 0; swipe < 3; swipe++) {
-            // Both actions, not just the lower one: stopping when the check
-            // comes into view can leave "Install opencode" just above the edge.
-            if (device.hasObject(By.text("Install opencode"))
-                    && device.hasObject(By.text("Check setup"))) {
-                return true;
-            }
-            device.swipe(width / 2, height / 5, width / 2, height * 4 / 5, 20);
-            device.waitForIdle();
+    private boolean actionsVisible() throws Exception {
+        if (!device.wait(Until.hasObject(By.text("Install opencode")), SHORT)) {
+            return false;
         }
-        return false;
+        return device.hasObject(By.text("Check setup"));
     }
 
     /** Fails at the moment output should have started, quoting what happened. */
