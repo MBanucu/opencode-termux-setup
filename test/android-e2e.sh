@@ -52,13 +52,32 @@ adb wait-for-device
 adb shell getprop ro.build.version.release
 
 echo "== install =="
-# CI signs every run with a fresh debug keystore, so an app installed from an
-# earlier artifact cannot be upgraded in place: adb refuses with
-# INSTALL_FAILED_UPDATE_INCOMPATIBLE. Start from a clean package instead.
-adb uninstall "$pkg" >/dev/null 2>&1 || true
-adb uninstall "$pkg.test" >/dev/null 2>&1 || true
-adb install "$apk"
-adb install "$test_apk"
+# Installing over the previous build is the normal case and costs well under a
+# second for both APKs. CI signs every run with a fresh debug keystore, so an app
+# installed from an earlier artifact cannot be upgraded in place and adb refuses
+# with INSTALL_FAILED_UPDATE_INCOMPATIBLE: that is the one case worth starting
+# from a clean package.
+install_apk() {
+    local path=$1 package=$2 output
+    if output=$(adb install -r "$path" 2>&1); then
+        echo "  $package installed over the previous build"
+        return 0
+    fi
+    case "$output" in
+        *INSTALL_FAILED_UPDATE_INCOMPATIBLE*|*"signatures do not match"*)
+            echo "  $package was signed differently; reinstalling it from scratch"
+            adb uninstall "$package" >/dev/null 2>&1 || true
+            adb install "$path"
+            ;;
+        *)
+            printf '%s\n' "$output" >&2
+            return 1
+            ;;
+    esac
+}
+
+install_apk "$apk" "$pkg"
+install_apk "$test_apk" "$pkg.test"
 
 # mktemp honours TMPDIR: Termux has no writable /tmp, so a hard-coded path made
 # tee fail and took the whole run down before the second class.

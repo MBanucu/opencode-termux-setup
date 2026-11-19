@@ -174,6 +174,11 @@ public final class PtyRenderingTest {
 
     /** Starts the terminal page with these bytes and nothing else to run. */
     private void render(String ptyBytes) {
+        // The page writes this file as it draws, and a screen that stays empty
+        // is not a change worth publishing: a file left behind by an earlier
+        // phase would otherwise be read as this page's screen. The app is no
+        // longer reinstalled between runs, so the file can survive one.
+        screen.delete();
         TestMilestones.mark("pty-" + testName.getMethodName());
         Intent probe = new Intent(context, TerminalActivity.class)
                 .putExtra(EXTRA_PROBE,
