@@ -25,8 +25,13 @@ adb wait-for-device
 adb shell getprop ro.build.version.release
 
 echo "== install =="
-adb install -r "$apk"
-adb install -r "$test_apk"
+# CI signs every run with a fresh debug keystore, so an app installed from an
+# earlier artifact cannot be upgraded in place: adb refuses with
+# INSTALL_FAILED_UPDATE_INCOMPATIBLE. Start from a clean package instead.
+adb uninstall "$pkg" >/dev/null 2>&1 || true
+adb uninstall "$pkg.test" >/dev/null 2>&1 || true
+adb install "$apk"
+adb install "$test_apk"
 
 # mktemp honours TMPDIR: Termux has no writable /tmp, so a hard-coded path made
 # tee fail and took the whole run down before the second class.
