@@ -115,6 +115,10 @@ adb shell "pm revoke $pkg com.termux.permission.RUN_COMMAND" || true
 run_phase "$pkg.PermissionDeniedTest" "$denied_log"
 grep -q 'OK (1 test)' "$denied_log" || { echo "denial path FAILED" >&2; exit 1; }
 
+# Put the device back the way the run found it: the denial phase revoked the
+# permission, and leaving it revoked makes the next manual tap ask for it again.
+adb shell "pm grant $pkg com.termux.permission.RUN_COMMAND" >/dev/null 2>&1 || true
+
 echo
 echo "both runs passed"
 
