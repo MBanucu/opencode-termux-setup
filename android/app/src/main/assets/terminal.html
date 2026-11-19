@@ -6,7 +6,9 @@
 <link rel="stylesheet" href="xterm/xterm.css">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #101418; overflow: hidden; }
-  #screen { width: 100%; height: 100%; padding: 6px; box-sizing: border-box; }
+  /* Extra room at the bottom: the frame is rounded and clipped, so a row sitting
+     flush against the edge reads as cut off. */
+  #screen { width: 100%; height: 100%; padding: 8px 8px 22px; box-sizing: border-box; }
   .xterm .xterm-viewport { background: #101418 !important; }
 </style>
 </head>
@@ -43,7 +45,12 @@
   term.open(document.getElementById('screen'));
 
   function fitNow() {
-    try { fit.fit(); } catch (e) { /* hidden or not laid out yet */ }
+    try {
+      fit.fit();
+      // Fitting changes the row count, which can leave the newest line below
+      // the last visible row.
+      term.scrollToBottom();
+    } catch (e) { /* hidden or not laid out yet */ }
   }
   fitNow();
   window.addEventListener('resize', fitNow);
@@ -60,7 +67,14 @@
   /** One chunk of the PTY's output, exactly as Termux wrote it. */
   window.writeB64 = function (base64) {
     if (waiting) { term.reset(); waiting = false; }
-    term.write(bytes(base64));
+    // Follow the output only if the view was at the bottom already, so reading
+    // back through a log is not yanked away. The callback runs once the chunk
+    // has been parsed, when the buffer height is final - scrolling before that
+    // is what left the last line hanging below the edge.
+    var atBottom = term.buffer.active.viewportY >= term.buffer.active.baseY;
+    term.write(bytes(base64), function () {
+      if (atBottom) term.scrollToBottom();
+    });
   };
 
   /** The placeholder shown between pressing a button and the first line. */
