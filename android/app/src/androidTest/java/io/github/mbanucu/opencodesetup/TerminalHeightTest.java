@@ -3,14 +3,10 @@ package io.github.mbanucu.opencodesetup;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import android.content.Intent;
+import android.content.Context;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.uiautomator.By;
-import androidx.test.uiautomator.UiDevice;
-import androidx.test.uiautomator.UiObject2;
-import androidx.test.uiautomator.Until;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -33,15 +29,14 @@ import java.util.regex.Pattern;
  * ({@code tail:{"fits":true,"terminal":900,...}}), and this test reads it at three
  * heights the page is asked to use through an intent extra.
  *
- * <p>The path is the real one: start page, check page, then the terminal page that
- * runs the command. The start page carries the height and a filler so the buffer
- * overflows, and the terminal page receives both.
+ * <p>The page is opened the same way the rendering cases open it, through
+ * {@link TerminalPage}: these tests measure the terminal, and the taps through
+ * the main and check pages cost seconds without adding evidence. The height and
+ * a filler - so the buffer overflows - travel directly to the page that uses
+ * them.
  */
 @RunWith(AndroidJUnit4.class)
 public final class TerminalHeightTest {
-
-    private static final String PACKAGE = "io.github.mbanucu.opencodesetup";
-    private static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
 
     /** Short, the default full-screen page, and a pinned tall one. */
     private static final float[] FRACTIONS = {0.2f, 0.45f, 0.62f};
@@ -53,12 +48,13 @@ public final class TerminalHeightTest {
     @Rule
     public final TestTimings timings = new TestTimings();
 
-    private UiDevice device;
+    private Context context;
+    private File events;
 
     @Before
-    public void grantPermission() throws Exception {
-        device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
-        device.executeShellCommand("pm grant " + PACKAGE + " " + PERMISSION);
+    public void setUp() {
+        context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        events = new File(context.getExternalFilesDir(null), "events.log");
     }
 
     @Test
@@ -66,11 +62,22 @@ public final class TerminalHeightTest {
         int previous = -1;
         for (float fraction : FRACTIONS) {
             long mark = eventsMark();
-            openFilledTerminalAt(fraction);
-
-            // The full buffer is what matters: an overflowing terminal keeps its
-            // newest row against the bottom edge, a two line one does not.
-            String tail = settledTail(mark);
+            TestMilestones.mark("height-" + fraction);
+            String tail;
+            try (TestMilestones.Step ignored =
+                         TestMilestones.step("filled terminal at " + fraction)) {
+                // The full buffer is what matters: an overflowing terminal keeps
+                // its newest row against the bottom edge, a two line one does not,
+                // so the page is told to fill itself instead of running a command
+                // that would clear it.
+                String name = "height-" + fraction + ".txt";
+                new File(context.getExternalFilesDir(null), name).delete();
+                context.startActivity(TerminalPage.opening(context, name)
+                        .putExtra("terminal_fraction", fraction)
+                        .putExtra("filler_lines", 300)
+                        .putExtra("terminal_title", "Height probe"));
+                tail = settledTail(mark);
+            }
             assertNotNull("the filled terminal reports its last line at " + fraction, tail);
             assertTrue("the last line has text at " + fraction + ": " + tail,
                     !tail.contains("\"chars\":0"));
@@ -87,53 +94,22 @@ public final class TerminalHeightTest {
     }
 
     /**
-     * Drives the app the way a user does, with the test hooks on the start page.
-     *
-     * <p>{@code CLEAR_TASK} gives a fresh page without stopping the process the
-     * test runner lives in, and the filler makes the terminal page write 300 lines
-     * instead of running a two line command that would clear them.
-     */
-    private void openFilledTerminalAt(float fraction) throws Exception {
-        for (int attempt = 0; attempt < 3; attempt++) {
-            // Started in-process, with the same extras a shell command carried:
-            // the shell was most of what an attempt cost.
-            InstrumentationRegistry.getInstrumentation().getTargetContext().startActivity(
-                    new Intent(Intent.ACTION_MAIN)
-                            .setClassName(PACKAGE, PACKAGE + ".MainActivity")
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                                    | Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                            .putExtra("terminal_fraction", fraction)
-                            .putExtra("filler_lines", 300));
-
-            UiObject2 check = device.wait(Until.findObject(By.text("Check setup")), SHORT);
-            if (check == null) {
-                continue;
-            }
-            check.click();
-
-            UiObject2 run = device.wait(Until.findObject(By.text("Run check")), SHORT);
-            if (run == null) {
-                continue;
-            }
-            run.click();
-            device.wait(Until.hasObject(By.text("Copy output")), SHORT);
-            return;
-        }
-        org.junit.Assert.fail("the terminal page did not open at " + fraction);
-    }
-
-    /**
      * The last geometry line that measured something, once the page has settled.
      *
      * <p>Clearing the terminal publishes an empty screen, and every repaint while
      * a chunk lands publishes another line; the one that matters is the last.
      */
     private String settledTail(long mark) throws Exception {
+        // The first look can find nothing: the page is started by the call that
+        // returns just before this, and on a cold process that is longer than
+        // the quiet window below. Silence only means something once the page has
+        // reported at least once.
+        FileWatcher.await(events, () -> lastTextTail(eventsSince(mark)) != null, SHORT);
         // Silence is the signal: the page republishes whenever its screen or its
         // size changes, so the measurements have stopped coming when the log has
         // gone this long without a new line. A fixed sleep was either wasted time
         // or a halfway drawn buffer read on a slow device.
-        String log = "";
+        String log = eventsSince(mark);
         long deadline = System.currentTimeMillis() + SHORT;
         while (System.currentTimeMillis() < deadline) {
             String latest = eventsSince(mark);
@@ -143,10 +119,15 @@ public final class TerminalHeightTest {
             }
             // Woken by the next write; when none comes for QUIET, it has settled.
             long left = Math.min(QUIET, deadline - System.currentTimeMillis());
-            if (left <= 0 || !FileWatcher.awaitChange(eventsFile(), left)) {
+            if (left <= 0 || !FileWatcher.awaitChange(events, left)) {
                 break;
             }
         }
+        return lastTextTail(log);
+    }
+
+    /** The last tail line that measured a line with text in it. */
+    private String lastTextTail(String log) {
         String tail = null;
         Matcher found = Pattern.compile("tail:\\{[^}]*\\}").matcher(log);
         Pattern chars = Pattern.compile("\"chars\":(\\d+)");
@@ -166,11 +147,10 @@ public final class TerminalHeightTest {
      * {@code logcat -d} gave, without a shell process on every 50 ms poll.
      */
     private String eventsSince(long mark) {
-        File file = eventsFile();
-        if (!file.isFile()) {
+        if (!events.isFile()) {
             return "";
         }
-        try (RandomAccessFile in = new RandomAccessFile(file, "r")) {
+        try (RandomAccessFile in = new RandomAccessFile(events, "r")) {
             long start = Math.min(mark, in.length());
             in.seek(start);
             byte[] buffer = new byte[(int) (in.length() - start)];
@@ -181,15 +161,9 @@ public final class TerminalHeightTest {
         }
     }
 
-    /** The file the app logs its events to. */
-    private File eventsFile() {
-        return new File(InstrumentationRegistry.getInstrumentation().getTargetContext()
-                .getExternalFilesDir(null), "events.log");
-    }
-
     /** The event log's length now, so the next reads only see what follows. */
     private long eventsMark() {
-        return eventsFile().length();
+        return events.length();
     }
 
     private int heightOf(String tail) {

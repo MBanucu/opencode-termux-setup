@@ -271,7 +271,9 @@ grep -q 'OK (6 tests)' "$setup_log" || { echo "setup flow FAILED" >&2; exit 1; }
 echo "== terminal behaviour (heights, PTY size, rendering) =="
 # Three classes in one instrumentation run: each start costs a couple of seconds
 # and none of them needs the app in a different state.
-#   heights - the last line fits at each of three heights.
+#   heights - the last line fits at each of three heights. Like the rendering
+#     cases it opens the terminal page directly, with the height and a filler as
+#     extras, instead of tapping through the main and check pages.
 #   size - a progress line that redraws itself with a carriage return is
 #     formatted to the PTY's width. At script's 80x24 default it wraps on a
 #     phone terminal and leaves the previous fragment behind, so the app makes

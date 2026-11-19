@@ -33,15 +33,20 @@ public final class TerminalActivity extends PageActivity {
         page.putExtra(EXTRA_LABEL, label);
         page.putExtra(EXTRA_DESCRIPTION, description);
         page.putExtra(EXTRA_TITLE, title);
-        if (from instanceof PageActivity) {
-            // Test hooks travel with the intent, so the terminal page is the one
-            // that receives the height and filler asked for on the start page.
-            Intent opener = ((PageActivity) from).getIntent();
-            if (opener != null) {
-                page.putExtras(opener);
-            }
-        }
         from.startActivity(page);
+    }
+
+    /**
+     * A probe or a filled page runs nothing, so it has no result of its own to
+     * receive - and taking one would print another page's output into a
+     * terminal that a test is reading.
+     */
+    @Override
+    protected boolean listensForResults() {
+        Intent opener = getIntent();
+        return opener != null
+                && opener.getStringExtra(EXTRA_PROBE) == null
+                && opener.getIntExtra("filler_lines", 0) <= 0;
     }
 
     @Override
@@ -50,7 +55,11 @@ public final class TerminalActivity extends PageActivity {
         Intent opener = getIntent();
         String command = opener == null ? null : opener.getStringExtra(EXTRA_COMMAND);
         String probe = opener == null ? null : opener.getStringExtra(EXTRA_PROBE);
-        if (command == null && probe == null) {
+        // A filler is a page of its own: a test asked for a full terminal and
+        // nothing to run, which is how the height test gets a buffer that
+        // overflows at every size.
+        int filler = opener == null ? 0 : opener.getIntExtra("filler_lines", 0);
+        if (command == null && probe == null && filler <= 0) {
             finish();
             return;
         }
@@ -64,7 +73,6 @@ public final class TerminalActivity extends PageActivity {
             return;
         }
 
-        int filler = opener.getIntExtra("filler_lines", 0);
         if (filler > 0) {
             // A test asked for a full terminal: a two line command would clear
             // what it wrote, so nothing is run here.

@@ -4,7 +4,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
-import android.content.Intent;
 import android.util.Base64;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -182,14 +181,11 @@ public final class PtyRenderingTest {
         screen = new File(context.getExternalFilesDir(null), name);
         screen.delete();
         TestMilestones.mark("pty-" + testName.getMethodName());
-        Intent probe = new Intent(context, TerminalActivity.class)
+        context.startActivity(TerminalPage.opening(context, name)
                 .putExtra(EXTRA_PROBE,
                         Base64.encodeToString(ptyBytes.getBytes(StandardCharsets.UTF_8),
                                 Base64.NO_WRAP))
-                .putExtra("screen_file", name)
-                .putExtra("terminal_title", "PTY probe")
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        context.startActivity(probe);
+                .putExtra("terminal_title", "PTY probe"));
     }
 
     /** Waits for the terminal to publish a screen that satisfies {@code wanted}. */

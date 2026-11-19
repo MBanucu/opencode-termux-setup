@@ -147,10 +147,18 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     @Override
     protected void onResume() {
         super.onResume();
-        RunCommandReceiver.setListener(this);
+        // A page that runs no command of its own must not receive one either: a
+        // result for a page that was covered when its command finished would
+        // otherwise be printed into a terminal that is measuring something else.
+        RunCommandReceiver.setListener(listensForResults() ? this : null);
         // A page that is brought forward again was already laid out; this line
         // is how the suite knows the tap has somewhere to land.
         announceReady();
+    }
+
+    /** Whether this page should receive a command's result while it is on top. */
+    protected boolean listensForResults() {
+        return true;
     }
 
     /**
