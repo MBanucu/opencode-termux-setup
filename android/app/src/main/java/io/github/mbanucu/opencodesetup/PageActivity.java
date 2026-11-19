@@ -53,6 +53,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private Button noticeAction;
     private TextView output;
     private Runnable pending;
+    private ScrollView page;
     private ScrollView outputScroll;
     private Terminal terminal;
     private volatile Live live;
@@ -68,6 +69,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         column.setPadding(pad, pad, pad, pad);
 
         ScrollView scroll = new ScrollView(this);
+        page = scroll;
         scroll.setFillViewport(true);
         scroll.setFitsSystemWindows(true);
         scroll.addView(column, new ScrollView.LayoutParams(
@@ -374,6 +376,9 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         }
         outputScroll.setVisibility(View.VISIBLE);
         outputScroll.fullScroll(View.FOCUS_DOWN);
+        // A long page can put the terminal below the fold; bring it into view so
+        // the output is seen as it arrives instead of after scrolling.
+        outputScroll.post(() -> page.smoothScrollTo(0, outputScroll.getTop()));
     }
 
     private void stopListening() {

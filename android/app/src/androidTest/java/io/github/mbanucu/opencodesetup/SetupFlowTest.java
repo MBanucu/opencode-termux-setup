@@ -186,6 +186,14 @@ public final class SetupFlowTest {
      */
     @Test
     public void dUninstallRemovesOpenCodeForReal() throws Exception {
+        // Removing something that is not installed is a one-second repository
+        // cleanup, not a removal, and its streamed output would be over before
+        // the page could show it. A previous run can leave it gone, so the state
+        // is restored first.
+        String present = checkOnce();
+        if (present == null || !CHECK_INSTALLED.matcher(present.trim()).matches()) {
+            installThroughThePage();
+        }
         device.findObject(By.text("Uninstall opencode")).click();
         assertTrue("the uninstall page opens",
                 device.wait(Until.hasObject(By.text("Remove opencode?")), SHORT));
@@ -219,13 +227,24 @@ public final class SetupFlowTest {
      */
     @Test
     public void eInstallPutsItBackForReal() throws Exception {
+        installThroughThePage();
+    }
+
+    /**
+     * Installs from the main page through the consent page, checking that the
+     * app is not pushed aside, that output streams while it runs, and that the
+     * version comes back from Termux afterwards. Used by the install test and by
+     * the uninstall test when it has to restore the state it removes.
+     */
+    private void installThroughThePage() throws Exception {
+        bringToFront();
         device.findObject(By.text("Install opencode")).click();
-        assertTrue("the consent dialog appears",
+        assertTrue("the install page opens",
                 device.wait(Until.hasObject(By.text("Download about 70 MB?")), SHORT));
 
         UiObject2 accept = device.wait(
                 Until.findObject(By.text(Pattern.compile("(?i)^start setup$"))), SHORT);
-        assertNotNull("the dialog offers to start the setup", accept);
+        assertNotNull("the page offers to start the setup", accept);
         accept.click();
 
         assertTrue("the app stays in front",
