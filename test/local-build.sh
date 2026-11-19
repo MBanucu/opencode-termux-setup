@@ -8,6 +8,7 @@
 #   bash test/local-build.sh                 # build both APKs, then run the suite
 #   bash test/local-build.sh --offline       # same, without Gradle hitting the network
 #   bash test/local-build.sh --skip-tests    # build only, print the APK paths
+#   bash test/local-build.sh --only <class>[#method]   # one test instead of the suite
 #
 # Needs: JDK 17+, an Android SDK (ANDROID_HOME, ANDROID_SDK_ROOT, ~/android-sdk
 # or /usr/lib/android-sdk), and for the suite adb plus Termux with
@@ -29,17 +30,22 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 android=$root/android
 offline=false
 run_tests=true
+only=""
 
 while [ $# -gt 0 ]; do
     case $1 in
-        --offline)    offline=true ;;
-        --skip-tests) run_tests=false ;;
+        --offline)    offline=true; shift ;;
+        --skip-tests) run_tests=false; shift ;;
+        --only)
+            [ -n "${2:-}" ] || { echo "--only needs a class or class#method" >&2; exit 2; }
+            only=$2
+            shift 2 ;;
         --help|-h)
             echo "usage: bash test/local-build.sh [--offline] [--skip-tests]"
+            echo "       bash test/local-build.sh --only <class>[#method]"
             exit 0 ;;
         *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
-    shift
 done
 
 # --- SDK -----------------------------------------------------------------------
@@ -101,8 +107,11 @@ echo "   test: $(wc -c < "$test_apk") bytes"
 if $run_tests; then
     echo
     echo "== end-to-end suite =="
+    if [ -n "$only" ]; then
+        echo "(one test: $only)"
+    fi
     suite_start=$SECONDS
-    if ! bash "$root/test/android-e2e.sh" "$apk" "$test_apk"; then
+    if ! bash "$root/test/android-e2e.sh" ${only:+--only "$only"} "$apk" "$test_apk"; then
         echo "suite FAILED after $((SECONDS - suite_start))s" >&2
         exit 1
     fi

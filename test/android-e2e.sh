@@ -3,6 +3,7 @@
 # Runs the instrumented end-to-end tests over adb against a connected device.
 #
 #   bash test/android-e2e.sh [app-debug.apk] [app-debug-androidTest.apk]
+#   bash test/android-e2e.sh --only <class>[#method]   # one test, nothing else
 #
 # Needs: adb in PATH, the device authorised, Termux installed with
 # allow-external-apps=true. python3 is optional: it only adds the timing history
@@ -10,6 +11,17 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+
+# A single class or one method of it, for the loop where waiting for the whole
+# suite is the slow part. Everything else - install, timings, the grant dance -
+# is the same.
+only=""
+if [ "${1:-}" = "--only" ]; then
+    only=${2:-}
+    [ -n "$only" ] || { echo "--only needs a class or class#method" >&2; exit 2; }
+    shift 2
+fi
+
 apk=${1:-$root/android/app/build/outputs/apk/debug/app-debug.apk}
 test_apk=${2:-$root/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk}
 pkg=io.github.mbanucu.opencodesetup
@@ -98,6 +110,19 @@ run_phase() {
             || true
     fi
 }
+
+if [ -n "$only" ]; then
+    echo "== $only (one test) =="
+    single_log=$(mktemp)
+    run_phase "$only" "$single_log"
+    grep -qE '^OK \([0-9]+ tests?\)' "$single_log" || {
+        echo "$only FAILED" >&2
+        exit 1
+    }
+    echo
+    echo "one test passed"
+    exit 0
+fi
 
 echo "== setup flow (permission granted) =="
 adb shell "pm grant $pkg com.termux.permission.RUN_COMMAND" || true
