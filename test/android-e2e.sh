@@ -148,8 +148,8 @@ run_phase() {
 }
 
 # --- recording ---------------------------------------------------------------
-# One MP4 for the run, in a format a player can stream (H.264 in MP4, remuxed
-# with faststart). Tests mark moments with TestMilestones, which logs the
+# One MP4 for the run, in a format a player can stream (H.264 in a fragmented
+# MP4, written as it records). Tests mark moments with TestMilestones, which logs the
 # device's monotonic uptime; the recording starts at a known uptime too, so a
 # milestone's second in the video is a subtraction, not a guess. Nothing is
 # extracted from the video during the run - test/frames.py does that on demand.
@@ -158,10 +158,14 @@ recording_saved=""
 recording_start_uptime=""
 milestone_log=""
 milestone_pid=""
+recorder_pid=""
 
 start_recording() {
     $record || return 0
-    adb shell "rm -f /data/local/tmp/suite.mp4" >/dev/null 2>&1 || true
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+        echo "recording skipped: ffmpeg is not installed" >&2
+        return 0
+    fi
     recording_start_uptime=$(adb shell cat /proc/uptime | awk '{print $1}')
     recording=$root/test/recordings/$(date +%s).mp4
     mkdir -p "$(dirname "$recording")"
@@ -171,10 +175,17 @@ start_recording() {
     adb logcat -c >/dev/null 2>&1 || true
     adb logcat -s OpencodeSetup:I > "$milestone_log" 2>/dev/null &
     milestone_pid=$!
-    # 720x1560 at 2M keeps the file small enough to pull and share; the suite is
-    # mostly still UI, which is what H.264 spends the least on.
-    adb shell screenrecord --size 720x1560 --bit-rate 2M --time-limit 900 \
-        /data/local/tmp/suite.mp4 >/dev/null 2>&1 &
+    # screenrecord hands out raw H.264 and ffmpeg wraps it in a fragmented MP4
+    # as it arrives, so the file on disk is already playable while the run is
+    # still going. There is no file on the device, nothing to pull when the run
+    # ends and no remux step: 720x1560 at 2M is small because a test screen is
+    # mostly still, which is what H.264 spends the least on.
+    adb exec-out screenrecord --size 720x1560 --bit-rate 2M --time-limit 900 \
+        --output-format=h264 - 2>/dev/null \
+      | ffmpeg -hide_banner -loglevel error -y -f h264 -i - -c copy \
+            -movflags frag_keyframe+empty_moov+default_base_moof \
+            "$recording" >/dev/null 2>&1 &
+    recorder_pid=$!
     echo "recording to $recording"
 }
 
@@ -183,14 +194,19 @@ stop_recording() {
     local saved=$recording
     recording=""
     recording_saved=$saved
+    # SIGINT lets screenrecord finish the frame it is on and close the stream;
+    # ffmpeg then writes its last fragment and exits, which is when the file is
+    # complete.
     adb shell "pkill -INT screenrecord" >/dev/null 2>&1 || true
-    # screenrecord finalises the file when it gets SIGINT; pull as soon as the
-    # process is gone instead of after a guessed pause.
-    for _ in $(seq 1 25); do
-        adb shell "pidof screenrecord" >/dev/null 2>&1 || break
-        sleep 0.2
-    done
-    adb pull /data/local/tmp/suite.mp4 "$saved" >/dev/null 2>&1 || true
+    if [ -n "$recorder_pid" ]; then
+        for _ in $(seq 1 50); do
+            kill -0 "$recorder_pid" >/dev/null 2>&1 || break
+            sleep 0.2
+        done
+        kill -INT "$recorder_pid" >/dev/null 2>&1 || true
+        wait "$recorder_pid" >/dev/null 2>&1 || true
+        recorder_pid=""
+    fi
     [ -n "$milestone_pid" ] && kill "$milestone_pid" >/dev/null 2>&1 || true
     milestone_pid=""
     python3 - "$saved" "$recording_start_uptime" "$milestone_log" <<'PY'
@@ -220,14 +236,6 @@ json.dump({"recording": os.path.basename(recording),
 print("  %d milestone(s), %d declared busy span(s) -> %s"
       % (len(milestones), len(busies), sidecar))
 PY
-    # A faststart MP4 plays while it is still being downloaded, which is the
-    # difference between a streamable file and one that has to arrive first.
-    if command -v ffmpeg >/dev/null 2>&1 && [ -f "$saved" ]; then
-        if ffmpeg -hide_banner -loglevel error -y -i "$saved" -c copy \
-            -movflags +faststart "$saved.stream.mp4" 2>/dev/null; then
-            mv "$saved.stream.mp4" "$saved"
-        fi
-    fi
     echo "  recording: $saved"
 }
 

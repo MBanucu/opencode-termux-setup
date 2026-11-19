@@ -816,6 +816,12 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         public void onScreen(String text) {
             screen = text;
             Diagnostics.log(PageActivity.this, "screen:" + text.length());
+            // A covered page keeps its web view timers running, so it would go on
+            // writing the one file every page shares - and the page in front
+            // would find the previous phase's screen instead of its own.
+            if (!hasWindowFocus()) {
+                return;
+            }
             File dir = getExternalFilesDir(null);
             if (dir != null) {
                 File file = new File(dir, "live-output.txt");
