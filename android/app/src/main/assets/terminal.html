@@ -144,6 +144,9 @@
       var box = rows[i].getBoundingClientRect();
       return {
         terminal: Math.round(area.height),
+        // The PTY is resized to this, so a redrawn progress line fits.
+        cols: term.cols,
+        rows: term.rows,
         row: Math.round(box.height),
         bottom: Math.round(box.bottom),
         limit: Math.round(area.bottom),
@@ -151,22 +154,45 @@
         chars: text.length
       };
     }
-    return { terminal: Math.round(area.height), row: 0, bottom: 0,
-             limit: Math.round(area.bottom), fits: false, chars: 0 };
+    return { terminal: Math.round(area.height), cols: term.cols, rows: term.rows,
+             row: 0, bottom: 0, limit: Math.round(area.bottom), fits: false, chars: 0 };
   }
 
   // Published once a second, not per chunk: every update is an accessibility
   // event, and a terminal that fires four a second keeps UI Automator from
   // getting a stable snapshot of the page.
   var last = '';
-  setInterval(function () {
+  var lastSize = '';
+
+  /** Publishes the screen and the size the PTY has to match, when either moved. */
+  function publish() {
+    // Before the first fit the emulator reports a couple of cells, and a command
+    // sent at that width is worse than one sent at the PTY's default.
+    var laidOut = term.cols >= 20 && term.rows >= 5;
+    var size = term.cols + 'x' + term.rows;
     var text = screenText();
-    if (text !== last && window.AndroidBridge) {
-      last = text;
-      window.AndroidBridge.onScreen(text);
-      window.AndroidBridge.onTail(JSON.stringify(tailInfo()));
+    var sizeChanged = laidOut && size !== lastSize;
+    if (!window.AndroidBridge || (text === last && !sizeChanged)) {
+      return;
     }
-  }, 1000);
+    last = text;
+    if (laidOut) {
+      lastSize = size;
+    }
+    window.AndroidBridge.onScreen(text);
+    window.AndroidBridge.onTail(JSON.stringify(tailInfo()));
+  }
+
+  // Published once a second, not per chunk: every update is an accessibility
+  // event, and a terminal that fires four a second keeps UI Automator from
+  // getting a stable snapshot of the page.
+  setInterval(publish, 1000);
+
+  // ...and once as soon as the page is laid out: the command waits for this size
+  // before it is handed to Termux, so every second before it is a second the
+  // user waits on an empty terminal.
+  fitNow();
+  publish();
 })();
 </script>
 </body>

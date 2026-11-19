@@ -34,16 +34,12 @@ import android.widget.TextView;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * A page of this app: a column of text, a terminal for Termux output and a
@@ -67,6 +63,9 @@ import java.util.List;
 abstract class PageActivity extends Activity implements RunCommandReceiver.Listener {
 
     private static final int REQUEST_RUN_COMMAND = 7;
+    /** The emulator's size as published in the tail report. */
+    private static final Pattern COLS = Pattern.compile("\"cols\":(\\d+)");
+    private static final Pattern ROWS = Pattern.compile("\"rows\":(\\d+)");
     private static final String TAG = "OpencodeSetup";
 
     protected LinearLayout column;
@@ -81,10 +80,18 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private boolean outputLoaded;
     private boolean fillerDone;
     private boolean fullScreen;
+    // What the emulator is actually showing: the PTY is resized to this, so a
+    // program that redraws a line with a carriage return fits instead of wrapping.
+    private volatile int columns;
+    private volatile int rows;
+    private volatile boolean streamed;
+    // A command waiting for the terminal to report its size: run as soon as that
+    // size arrives, or unconditionally after a few seconds.
+    private Runnable pendingSend;
     private final Deque<String> waitingScripts = new ArrayDeque<>();
     private final List<Button> actionButtons = new ArrayList<>();
     private final List<View> collapseOnRun = new ArrayList<>();
-    private volatile Live live;
+    private final LiveStream liveStream = new LiveStream();
     private volatile String screen = "";
     private final Handler ui = new Handler(Looper.getMainLooper());
     private Runnable pending;
@@ -528,14 +535,49 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     }
 
     private void send(String command, String label, String description) {
-        Live opened = listen();
+        send(command, label, description, false);
+    }
+
+    private void send(String command, String label, String description, boolean force) {
+        // The terminal is created before the size wait, not after the send: it is
+        // what reports the size, and creating it later meant waiting for a report
+        // that could not arrive until the command had already gone out. It also
+        // has to be visible while it measures - a hidden view is zero cells wide
+        // and reports nothing, which left the wait to time out.
+        outputBox();
+        if (terminalFrame != null) {
+            terminalFrame.setVisibility(View.VISIBLE);
+        }
+        if (columns <= 0 && !force) {
+            // The emulator reports its size on its first tick, just after the page
+            // opens. Wait for that instead of guessing a width, but never hold
+            // the command for longer than a few seconds.
+            pendingSend = () -> send(command, label, description, true);
+            ui.postDelayed(() -> {
+                Runnable ready = pendingSend;
+                pendingSend = null;
+                if (ready != null) {
+                    ready.run();
+                }
+            }, 10_000);
+            return;
+        }
+        pendingSend = null;
+        int port = liveStream.open(chunk -> {
+            // Only live chunks are logged this way: the final result is a
+            // different path, so a "stream:" line always means output arrived
+            // while the command was still running.
+            Diagnostics.log(this, "stream:" + chunk.length());
+            streamed = true;
+            write(chunk);
+        });
         try {
-            TermuxCommands.send(this, command, label, description,
-                    opened == null ? 0 : opened.port());
+            TermuxCommands.send(this, command, label, description, port, columns, rows);
             Diagnostics.log(this, "sent " + label + " port="
-                    + (opened == null ? "none" : opened.port()));
+                    + (port == 0 ? "none" : port)
+                    + " pty=" + columns + "x" + rows);
             clearNotice();
-            if (opened != null) {
+            if (port > 0) {
                 startOutput();
             }
         } catch (RuntimeException refused) {
@@ -556,8 +598,17 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         Diagnostics.log(this, "result: " + text.replace("\n", " | "));
         stopListening();
         running(false);
-        script("resetTerm()");
-        write(text);
+        if (streamed) {
+            // The emulator already shows the PTY's own rendering, progress
+            // redraws and colours included. Resetting it to the sanitized bundle
+            // would strip all of that and print every redraw as its own line, so
+            // only the verdict is added.
+            int verdict = text.lastIndexOf("exit code ");
+            write("\n" + (verdict < 0 ? text : text.substring(verdict)) + "\n");
+        } else {
+            script("resetTerm()");
+            write(text);
+        }
         reveal();
     }
 
@@ -588,63 +639,6 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard != null) {
             clipboard.setPrimaryClip(ClipData.newPlainText("opencode-setup", text));
-        }
-    }
-
-    // --- live output --------------------------------------------------------
-
-    /** The loopback port Termux writes a running command's output to. */
-    private static final class Live {
-        final ServerSocket socket;
-
-        Live(ServerSocket socket) {
-            this.socket = socket;
-        }
-
-        int port() {
-            return socket.getLocalPort();
-        }
-    }
-
-    /**
-     * Opens a loopback port before the command is sent. Termux copies the PTY's
-     * output into it as the command produces it, which is what makes the
-     * terminal fill while apt is still working instead of only when it exits.
-     */
-    private Live listen() {
-        stopListening();
-        try {
-            // 127.0.0.1 by name: getLoopbackAddress() may hand back ::1, and
-            // Termux's bash connects to the IPv4 literal below.
-            Live opened = new Live(
-                    new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")));
-            live = opened;
-            Thread pump = new Thread(() -> pump(opened), "termux-output");
-            pump.setDaemon(true);
-            pump.start();
-            return opened;
-        } catch (IOException noPort) {
-            // No port means no live output; the result bundle still arrives.
-            Log.w(TAG, "could not open a local port for live output", noPort);
-            return null;
-        }
-    }
-
-    private void pump(Live opened) {
-        try (Socket connection = opened.socket.accept()) {
-            Reader reader = new InputStreamReader(connection.getInputStream(),
-                    StandardCharsets.UTF_8);
-            char[] buffer = new char[4096];
-            int read;
-            while (live == opened && (read = reader.read(buffer)) >= 0) {
-                // Only live chunks are logged this way: the final result is a
-                // different path, so a "stream:" line always means output
-                // arrived while the command was still running.
-                Diagnostics.log(this, "stream:" + read);
-                write(new String(buffer, 0, read));
-            }
-        } catch (IOException done) {
-            // The command exited or the page went away; the result follows.
         }
     }
 
@@ -710,6 +704,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         outputBox();
         running(true);
         screen = "";
+        streamed = false;
         script("resetTerm()");
         String waiting = getString(R.string.output_waiting);
         script("waitingB64('" + Base64.encodeToString(
@@ -726,16 +721,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     }
 
     private void stopListening() {
-        Live opened = live;
-        live = null;
-        if (opened == null) {
-            return;
-        }
-        try {
-            opened.socket.close();
-        } catch (IOException ignored) {
-            // Already closed.
-        }
+        liveStream.close();
     }
 
     /**
@@ -749,6 +735,27 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
          */
         @JavascriptInterface
         public void onTail(String json) {
+            // The size travels here rather than through a call of its own: this
+            // method is the path that is known to arrive, and a dedicated
+            // call turned out to be dropped.
+            java.util.regex.Matcher cols = COLS.matcher(json);
+            java.util.regex.Matcher rows = ROWS.matcher(json);
+            if (cols.find() && rows.find()) {
+                int reportedColumns = Integer.parseInt(cols.group(1));
+                int reportedRows = Integer.parseInt(rows.group(1));
+                // Before its first fit the emulator reports a couple of cells.
+                // Sending a command at that width is worse than waiting.
+                if (reportedColumns >= 20 && reportedRows >= 5) {
+                    columns = reportedColumns;
+                    // Qualified: "rows" above is the matcher, not the field.
+                    PageActivity.this.rows = reportedRows;
+                }
+            }
+            Runnable ready = pendingSend;
+            if (ready != null && columns > 0) {
+                pendingSend = null;
+                ui.post(ready);
+            }
             Diagnostics.log(PageActivity.this, "tail:" + json);
         }
 

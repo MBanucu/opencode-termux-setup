@@ -13,7 +13,6 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
-import java.util.regex.Pattern;
 
 /**
  * Receives the result bundle Termux sends back for a RUN_COMMAND.
@@ -32,10 +31,6 @@ public final class RunCommandReceiver extends BroadcastReceiver {
 
     /** Bundle key used by Termux for the result (PLUGIN_RESULT_BUNDLE). */
     private static final String EXTRA_RESULT_BUNDLE = "result";
-
-    /** CSI and OSC escapes, which a PTY writes for colour and progress. */
-    private static final Pattern ANSI =
-            Pattern.compile("\u001b\\[[0-9;?]*[ -/]*[@-~]|\u001b\\][^\u0007]*\u0007");
 
     interface Listener {
         void onCommandResult(String text);
@@ -82,41 +77,21 @@ public final class RunCommandReceiver extends BroadcastReceiver {
         }
     }
 
-    /**
-     * The PTY's bytes as plain lines: escapes removed, and a line redrawn with
-     * carriage returns keeps only what ended up on screen.
-     */
-    private static String plain(String text) {
-        if (text == null || text.isEmpty()) {
-            return "";
-        }
-        String[] lines = ANSI.matcher(text).replaceAll("").split("\n", -1);
-        StringBuilder cleaned = new StringBuilder();
-        for (String line : lines) {
-            int carriage = line.lastIndexOf('\r');
-            String shown = carriage < 0 ? line : line.substring(carriage + 1);
-            if (cleaned.length() > 0 || !shown.trim().isEmpty()) {
-                cleaned.append(shown).append('\n');
-            }
-        }
-        return cleaned.toString().trim();
-    }
-
     private static String describe(Bundle result) {
         if (result == null) {
             return "Termux returned no result for this command. Everything runs in its background runner; the Termux notification shows the log.";
         }
 
         StringBuilder text = new StringBuilder();
-        String message = plain(result.getString("errmsg", ""));
+        String message = PtyText.plain(result.getString("errmsg", ""));
         if (!message.isEmpty()) {
             text.append(message).append("\n\n");
         }
-        String stdout = plain(result.getString("stdout", ""));
+        String stdout = PtyText.plain(result.getString("stdout", ""));
         if (!stdout.isEmpty()) {
             text.append(stdout).append('\n');
         }
-        String stderr = plain(result.getString("stderr", ""));
+        String stderr = PtyText.plain(result.getString("stderr", ""));
         if (!stderr.isEmpty()) {
             text.append(stderr).append('\n');
         }

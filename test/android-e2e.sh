@@ -114,6 +114,15 @@ height_log=$(mktemp)
 run_phase "$pkg.TerminalHeightTest" "$height_log"
 grep -q 'OK (1 test)' "$height_log" || { echo "terminal height test FAILED" >&2; exit 1; }
 
+echo "== PTY size (the terminal's width reaches Termux) =="
+# A progress line that redraws itself with a carriage return is formatted to the
+# PTY's width. At script's 80x24 default it wraps on a phone terminal and leaves
+# the previous fragment behind, so the app resizes the PTY to the emulator's own
+# columns and reports both numbers in events.log, which this test waits for.
+pty_log=$(mktemp)
+run_phase "$pkg.PtySizeTest" "$pty_log"
+grep -q 'OK (1 test)' "$pty_log" || { echo "PTY size test FAILED" >&2; exit 1; }
+
 echo "== denial path (permission revoked, separate run) =="
 # Revoking a dangerous permission kills the target process, hence a second run.
 adb shell "pm revoke $pkg com.termux.permission.RUN_COMMAND" || true
