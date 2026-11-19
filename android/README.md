@@ -58,9 +58,18 @@ assertion comes from a screenshot.
 - `SetupFlowTest` — the main screen offers four actions; each consent dialog
   names its command and what it changes (sizes and repository for install, kept
   credentials for uninstall), and cancel closes it without a side effect;
-  approving install hands the command to Termux and waits for Termux's window to
-  take the foreground; "Check setup" round-trips a real `RUN_COMMAND` through
-  Termux and back into the output view (`exit code 0`).
+  **Remove really removes**: it presses the button, waits for Termux's window,
+  then asks "Check setup" until Termux reports `opencode is not installed`;
+  **Start setup really installs**: after that removal it downloads and installs
+  opencode again (~70 MB) and the test passes only once Termux reports a version
+  with `exit code 0`. So the suite runs with no opencode on the device and
+  leaves one behind.
+
+Both real operations are asynchronous in Termux, so their budget is measured in
+what they actually do: up to 5 minutes for a removal (apt lock and package swap)
+and up to 15 minutes for a reinstall (a 70 MB download over mobile data). A check
+that answers while the work is still running is ignored rather than trusted -
+the test asks again, and only a check started after the work finished counts.
 - `PermissionDeniedTest` — a second run on purpose, because revoking a dangerous
   permission kills the process the runner lives in: Android asks for
   `com.termux.permission.RUN_COMMAND`, and a denial produces the explanation with
@@ -70,6 +79,8 @@ assertion comes from a screenshot.
 cd android && ./gradlew assembleDebug assembleDebugAndroidTest
 bash ../test/android-e2e.sh      # adb install + am instrument, both runs
 ```
+
+Expect several minutes: the suite uninstalls and reinstalls the real package.
 
 CI compiles both APKs on every push (`assembleDebugAndroidTest`) and uploads the
 test APK, so a test that stops compiling cannot land. Running them needs a device
