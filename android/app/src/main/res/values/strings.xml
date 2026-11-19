@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">opencode-setup</string>
-    <string name="tagline">Install the OpenCode coding agent in Termux — one button, native build, no proot.</string>
+    <string name="tagline">Install or remove the OpenCode coding agent in Termux — native build, no proot.</string>
 
     <string name="status_termux_installed">Termux is installed.</string>
     <string name="status_termux_missing">Termux is not installed. Install it first; this app only handles setup.</string>
 
     <string name="action_check">Check setup</string>
     <string name="action_install">Install opencode</string>
+    <string name="action_uninstall">Uninstall opencode</string>
     <string name="action_open">Open Termux</string>
 
     <string name="hint">Setup runs in Termux, where you can watch it; the command is in the confirmation dialog first.
@@ -27,6 +28,18 @@ curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/
 Nothing is uploaded. Use Wi-Fi if mobile data is metered. You can cancel now and run the same step by hand later.</string>
     <string name="consent_accept">Start setup</string>
     <string name="consent_cancel">Cancel</string>
+
+    <string name="uninstall_title">Remove opencode?</string>
+    <string name="uninstall_message">Termux will run:
+
+curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/uninstall.sh | bash
+
+That removes the opencode package and the APT repository that install.sh added.
+
+Your provider credentials, sessions and settings in ~/.config/opencode and ~/.local/share/opencode are kept, so installing again picks up where you left off. The command prints those paths, and deleting them is a separate step.
+
+Nothing is uploaded. You can cancel now and run the same command by hand later.</string>
+    <string name="uninstall_accept">Remove</string>
 
     <string name="permission_title">Termux refused the command</string>
     <string name="permission_message">Termux only accepts commands from other apps when this is enabled in its own settings:

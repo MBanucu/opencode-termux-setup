@@ -15,6 +15,12 @@ The visible `terminal-session` runner runs it in the Termux window, so the
 download progress is yours to watch and Ctrl+C works. "Check setup" uses the
 background `app-shell` runner and prints `opencode --version` back in the app.
 
+"Uninstall opencode" is the inverse, and it is deliberately conservative: it
+removes the package and the APT repository that `install.sh` added, and leaves
+`~/.config/opencode` and `~/.local/share/opencode` untouched, so provider
+authentication and sessions survive a reinstall. Deleting those is a separate,
+manual `uninstall.sh --purge`.
+
 ## Build
 
 No local Android SDK is needed: CI is the compiler.
@@ -49,10 +55,12 @@ accessibility event stream: waits are `Until.hasObject` / `Until.findObject` /
 sleep, and the nodes a screen reader would see are what the tests match on. No
 assertion comes from a screenshot.
 
-- `SetupFlowTest` — the main screen offers the three actions; the consent dialog
-  names the repository, the sizes and the command, and cancel closes it without
-  side effects; "Check setup" round-trips a real `RUN_COMMAND` through Termux and
-  back into the output view (`exit code 0`).
+- `SetupFlowTest` — the main screen offers four actions; each consent dialog
+  names its command and what it changes (sizes and repository for install, kept
+  credentials for uninstall), and cancel closes it without a side effect;
+  approving install hands the command to Termux and waits for Termux's window to
+  take the foreground; "Check setup" round-trips a real `RUN_COMMAND` through
+  Termux and back into the output view (`exit code 0`).
 - `PermissionDeniedTest` — a second run on purpose, because revoking a dangerous
   permission kills the process the runner lives in: Android asks for
   `com.termux.permission.RUN_COMMAND`, and a denial produces the explanation with

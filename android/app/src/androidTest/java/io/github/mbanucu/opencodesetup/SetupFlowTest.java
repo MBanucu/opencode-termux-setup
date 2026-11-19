@@ -28,9 +28,11 @@ import java.util.regex.Pattern;
  * {@code Until.findObject} return as soon as a matching node is published, and
  * {@code Until.gone} fires when it is removed. There is no polling loop.
  *
- * <p>The Termux side is real: "Check setup" leaves the app as a RUN_COMMAND, and
- * the {@code RunCommandReceiver} broadcast has to arrive before the assertion on
- * the output view can pass — that is the event the last test waits for.
+ * <p>The Termux side is real. "Check setup" leaves the app as a RUN_COMMAND and
+ * the {@code RunCommandReceiver} broadcast has to arrive before the output
+ * assertion can pass. "Install opencode" and "Uninstall opencode" go out on the
+ * visible {@code terminal-session} runner, so for them the event that proves the
+ * handoff is Termux's own window taking the foreground.
  *
  * <p>Prerequisites on the device: Termux installed, {@code allow-external-apps=true}
  * in {@code ~/.termux/termux.properties}, and this package installed. Run with
@@ -41,6 +43,7 @@ import java.util.regex.Pattern;
 public final class SetupFlowTest {
 
     private static final String PACKAGE = "io.github.mbanucu.opencodesetup";
+    private static final String TERMUX = "com.termux";
     private static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
     private static final long SHORT = 10_000;
     private static final long LONG = 120_000;
@@ -57,15 +60,16 @@ public final class SetupFlowTest {
     }
 
     @Test
-    public void aMainScreenOffersTheThreeActions() throws Exception {
+    public void aMainScreenOffersTheFourActions() throws Exception {
         assertNotNull("install", device.findObject(By.text("Install opencode")));
+        assertNotNull("uninstall", device.findObject(By.text("Uninstall opencode")));
         assertNotNull("check", device.findObject(By.text("Check setup")));
         assertNotNull("open Termux", device.findObject(By.text("Open Termux")));
         shot("01-main.png");
     }
 
     @Test
-    public void bConsentDialogStatesTheDownload() throws Exception {
+    public void bInstallConsentDialogStatesTheDownload() throws Exception {
         device.findObject(By.text("Install opencode")).click();
         assertTrue("the consent dialog appears",
                 device.wait(Until.hasObject(By.text("Download about 70 MB?")), SHORT));
@@ -91,10 +95,59 @@ public final class SetupFlowTest {
         cancel.click();
         assertTrue("cancel closes the dialog and runs nothing",
                 device.wait(Until.gone(By.text("Download about 70 MB?")), SHORT));
+        assertTrue("no Termux window was opened by cancelling",
+                !device.hasObject(By.pkg(TERMUX)));
     }
 
     @Test
-    public void cCheckReportsThroughTermux() throws Exception {
+    public void cUninstallConsentDialogStatesWhatIsRemoved() throws Exception {
+        device.findObject(By.text("Uninstall opencode")).click();
+        assertTrue("the uninstall dialog appears",
+                device.wait(Until.hasObject(By.text("Remove opencode?")), SHORT));
+
+        UiObject2 message = device.wait(
+                Until.findObject(By.textContains("uninstall.sh")), SHORT);
+        assertNotNull("the dialog shows the command it will run", message);
+        String text = message.getText();
+        assertTrue("it says the package and the repository go",
+                text.contains("opencode package") && text.contains("APT repository"));
+        assertTrue("it says credentials and sessions are kept",
+                text.contains("kept") && text.contains("~/.config/opencode"));
+        shot("03-uninstall-consent.png");
+
+        UiObject2 cancel = device.wait(
+                Until.findObject(By.text(Pattern.compile("(?i)^cancel$"))), SHORT);
+        assertNotNull("the dialog offers a cancel button", cancel);
+        cancel.click();
+        assertTrue("cancel closes the dialog and removes nothing",
+                device.wait(Until.gone(By.text("Remove opencode?")), SHORT));
+        assertTrue("no Termux window was opened by cancelling",
+                !device.hasObject(By.pkg(TERMUX)));
+    }
+
+    @Test
+    public void dInstallHandsTheCommandToTermux() throws Exception {
+        device.findObject(By.text("Install opencode")).click();
+        assertTrue("the consent dialog appears",
+                device.wait(Until.hasObject(By.text("Download about 70 MB?")), SHORT));
+
+        UiObject2 accept = device.wait(
+                Until.findObject(By.text(Pattern.compile("(?i)^start setup$"))), SHORT);
+        assertNotNull("the dialog offers to start the setup", accept);
+        accept.click();
+
+        // Approving has to leave this app and reach Termux: the install runs on
+        // the visible runner, so Termux's window coming to the front is the
+        // accessibility event that proves the RUN_COMMAND was accepted. The
+        // reinstall over the installed package is idempotent and downloads
+        // nothing.
+        assertTrue("the setup is handed to the Termux window",
+                device.wait(Until.hasObject(By.pkg(TERMUX)), LONG));
+        shot("04-install-handoff.png");
+    }
+
+    @Test
+    public void eCheckReportsThroughTermux() throws Exception {
         device.findObject(By.text("Check setup")).click();
 
         // Event-driven: the output view only exists after the PendingIntent the
@@ -109,7 +162,7 @@ public final class SetupFlowTest {
                 report.contains("opencode v") || report.contains("opencode is not installed"));
         assertTrue("a background command stays in the app window",
                 device.hasObject(By.pkg(PACKAGE)));
-        shot("03-check.png");
+        shot("05-check.png");
     }
 
     private void shot(String name) throws Exception {

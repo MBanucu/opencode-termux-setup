@@ -46,6 +46,10 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
             "curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/install.sh"
                     + " | bash";
 
+    private static final String UNINSTALL_COMMAND =
+            "curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/uninstall.sh"
+                    + " | bash";
+
     private static final String ALLOW_EXTERNAL_APPS =
             "echo 'allow-external-apps=true' >> ~/.termux/termux.properties"
                     + " && termux-reload-settings";
@@ -101,6 +105,7 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
         column.addView(status);
 
         column.addView(button(R.string.action_install, v -> confirmSetup()));
+        column.addView(button(R.string.action_uninstall, v -> confirmUninstall()));
         column.addView(button(R.string.action_check, v -> runCheck()));
         column.addView(button(R.string.action_open, v -> openTermux()));
 
@@ -164,6 +169,22 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
                         (dialog, which) -> start(INSTALL_COMMAND,
                                 "Install opencode",
                                 "Add the opencode apt repository and install opencode",
+                                false))
+                .show();
+    }
+
+    private void confirmUninstall() {
+        if (!requireTermux()) {
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.uninstall_title)
+                .setMessage(R.string.uninstall_message)
+                .setNegativeButton(R.string.consent_cancel, null)
+                .setPositiveButton(R.string.uninstall_accept,
+                        (dialog, which) -> start(UNINSTALL_COMMAND,
+                                "Uninstall opencode",
+                                "Remove the opencode package and its apt repository",
                                 false))
                 .show();
     }
