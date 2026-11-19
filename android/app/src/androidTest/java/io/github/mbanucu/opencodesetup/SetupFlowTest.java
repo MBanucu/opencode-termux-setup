@@ -66,10 +66,14 @@ public final class SetupFlowTest {
     private static final long STREAM = 8_000;
     /** Between two checks while waiting for a long command to finish. */
     private static final long RETRY = 3_000;
-    /** A removal is one apt transaction, but it waits for the apt lock. */
-    private static final long UNINSTALL_BUDGET = 300_000;
-    /** A reinstall downloads ~70 MB, so it gets a download-sized budget. */
-    private static final long INSTALL_BUDGET = 900_000;
+    /**
+     * How long a running command may produce nothing at all.
+     *
+     * <p>A ~70 MB download takes as long as the network takes, so there is no
+     * honest duration to assert on: the test watches the download and fails on
+     * silence, not on slowness.
+     */
+    private static final long STALL = 60_000;
 
     /**
      * What "Check setup" prints, and nothing else. Matching the whole result is
@@ -216,7 +220,7 @@ public final class SetupFlowTest {
         assertStreamed("the page shows Termux's output while the removal is still running");
         // Ask only once the removal is over: a check sent while it runs answers
         // with the old state, and the two results race in last-result.txt.
-        waitForResult(UNINSTALL_BUDGET);
+        waitForResult(STALL);
 
         String report = checkUntil(CHECK_REMOVED, 60_000);
         assertTrue("the check that reported the removal ran in the app: " + report,
@@ -264,7 +268,7 @@ public final class SetupFlowTest {
                 device.hasObject(By.pkg(TERMUX)));
         shot("07-install-started.png");
         assertStreamed("the page shows the install as it happens, not only at the end");
-        waitForResult(INSTALL_BUDGET);
+        waitForResult(STALL);
 
         String report = checkUntil(CHECK_INSTALLED, 60_000);
         assertTrue("the check that reported the version ran in the app: " + report,
@@ -469,22 +473,46 @@ public final class SetupFlowTest {
     }
 
     /**
-     * Waits for the app to log that the command it started has finished.
+     * Follows the running command until it finishes.
      *
-     * <p>Without this the flow races against itself: a check sent while an
-     * install is still running answers with the state before it, and the
-     * installer's summary and the check's answer overwrite each other in
-     * {@code last-result.txt}.
+     * <p>Nothing here assumes how fast a download is. The app logs the size of
+     * every chunk Termux streams, and rewrites {@code live-output.txt} with what
+     * the terminal shows; either changing means the command is still working, so
+     * the clock only runs out when it is silent. That way a slow mirror is a slow
+     * test rather than a failure, and a hang is reported in a minute.
+     *
+     * <p>Waiting also keeps the flow honest: a check sent while an install is
+     * still running answers with the state before it, and the installer's summary
+     * and the check's answer overwrite each other in {@code last-result.txt}.
      */
-    private void waitForResult(long budget) throws Exception {
-        long deadline = System.currentTimeMillis() + budget;
-        while (System.currentTimeMillis() < deadline) {
-            if (device.executeShellCommand("logcat -d -s OpencodeSetup:I").contains("result: ")) {
+    private void waitForResult(long stall) throws Exception {
+        long lastProgress = System.currentTimeMillis();
+        String seen = "";
+        long bytes = 0;
+        while (System.currentTimeMillis() - lastProgress < stall) {
+            String log = device.executeShellCommand("logcat -d -s OpencodeSetup:I");
+            if (log.contains("result: ")) {
                 return;
+            }
+            Matcher chunk = Pattern.compile("stream:(\\d+)").matcher(log);
+            StringBuilder sizes = new StringBuilder();
+            while (chunk.find()) {
+                sizes.append(chunk.group(1)).append(',');
+            }
+            String progress = sizes + "|" + read(liveOutputFile());
+            if (!progress.equals(seen)) {
+                seen = progress;
+                lastProgress = System.currentTimeMillis();
+                bytes = 0;
+                Matcher counted = Pattern.compile("stream:(\\d+)").matcher(log);
+                while (counted.find()) {
+                    bytes += Long.parseLong(counted.group(1));
+                }
             }
             Thread.sleep(500);
         }
-        fail("the command did not finish within " + (budget / 1000) + "s. " + diagnosis());
+        fail("the command streamed " + bytes + " bytes and then produced nothing for "
+                + (stall / 1000) + "s. " + diagnosis());
     }
 
     /**
