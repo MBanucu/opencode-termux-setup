@@ -325,20 +325,18 @@ public final class SetupFlowTest {
     // --- helpers -------------------------------------------------------------
 
     /**
-     * Gets back to the main page the way a user does: back out of whichever page
-     * is open. {@code am start} alone is not enough - when the activity is
-     * already in this app's stack the system delivers the intent to it
-     * (result code 3) instead of bringing the task forward, so the page never
-     * changes.
+     * Gets back to the main page by closing the app and opening it again.
+     *
+     * <p>Pressing back until the stack emptied was slow and ended somewhere
+     * different every time - a page deeper in the app, or the launcher with the
+     * app gone, which is not a state the next action can start from.
+     * {@code CLEAR_TASK} finishes every page of the task and starts the main one
+     * fresh. Plain {@code am start} is not enough: when the activity is already
+     * in the stack the system delivers the intent to it instead of bringing the
+     * task forward, so the page never changes.
      */
     private void bringToFront() throws Exception {
-        for (int attempt = 0; attempt < 3 && !device.hasObject(By.text("Check setup")); attempt++) {
-            device.pressBack();
-            device.waitForIdle();
-        }
-        if (!device.hasObject(By.text("Check setup"))) {
-            device.executeShellCommand("am start -W -n " + PACKAGE + "/.MainActivity");
-        }
+        device.executeShellCommand("am start -W -f 0x10008000 -n " + PACKAGE + "/.MainActivity");
         scrollToTop();
         assertTrue("the app is in the foreground, with its actions in view: " + diagnosis(),
                 device.wait(Until.hasObject(By.text("Check setup")), SHORT));
