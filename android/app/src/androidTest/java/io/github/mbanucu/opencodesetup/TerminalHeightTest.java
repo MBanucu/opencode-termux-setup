@@ -103,14 +103,25 @@ public final class TerminalHeightTest {
         Thread.sleep(500);
     }
 
-    /** The geometry line the page logs once its text changes. */
+    /**
+     * The first geometry line that measured something.
+     *
+     * <p>Clearing the terminal publishes an empty screen, and with it a line with
+     * no row in it; taking that one made a page that had rendered fine look like
+     * it had no text at all.
+     */
     private String awaitTail(long budget) throws Exception {
         long deadline = System.currentTimeMillis() + budget;
+        Pattern line = Pattern.compile("tail:\\{[^}]*\\}");
+        Pattern chars = Pattern.compile("\"chars\":(\\d+)");
         while (System.currentTimeMillis() < deadline) {
             String log = device.executeShellCommand("logcat -d -s OpencodeSetup:I");
-            Matcher tail = Pattern.compile("tail:\\{[^}]*\\}").matcher(log);
-            if (tail.find()) {
-                return tail.group();
+            Matcher tail = line.matcher(log);
+            while (tail.find()) {
+                Matcher count = chars.matcher(tail.group());
+                if (count.find() && Integer.parseInt(count.group(1)) > 0) {
+                    return tail.group();
+                }
             }
             Thread.sleep(250);
         }
