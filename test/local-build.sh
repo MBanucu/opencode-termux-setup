@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+#
+# Builds the app and the instrumented test APKs on this machine, then runs the
+# end-to-end suite against a connected device.  This is the loop for checking a
+# change without pushing to GitHub, where .github/workflows/android.yml is the
+# compiler of record.
+#
+#   bash test/local-build.sh                 # build both APKs, then run the suite
+#   bash test/local-build.sh --offline       # same, without Gradle hitting the network
+#   bash test/local-build.sh --skip-tests    # build only, print the APK paths
+#
+# Needs: JDK 17+, an Android SDK (ANDROID_HOME, ANDROID_SDK_ROOT, ~/android-sdk
+# or /usr/lib/android-sdk), and for the suite adb plus Termux with
+# allow-external-apps=true.
+#
+# Two things this does that a bare ./gradlew does not:
+#
+#   * The SDK path goes into android/local.properties (git-ignored) as well as
+#     the environment, because a running Gradle daemon keeps the environment it
+#     was started with and otherwise reports "SDK location not found".
+#
+#   * Termux's aarch64 aapt2 is used when it is installed.  Google ships aapt2
+#     for x86_64 only, so on an aarch64 host AGP's copy dies with "AAPT2 daemon
+#     startup failed"; `pkg install aapt2` provides a native one, passed here as
+#     a command-line property so nothing machine-specific lands in gradle.properties.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+android=$root/android
+offline=false
+run_tests=true
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        --offline)    offline=true ;;
+        --skip-tests) run_tests=false ;;
+        --help|-h)
+            echo "usage: bash test/local-build.sh [--offline] [--skip-tests]"
+            exit 0 ;;
+        *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# --- SDK -----------------------------------------------------------------------
+sdk=""
+for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/android-sdk" /usr/lib/android-sdk; do
+    if [ -n "$candidate" ] && [ -d "$candidate/platforms" ]; then
+        sdk=$candidate
+        break
+    fi
+done
+if [ -z "$sdk" ]; then
+    echo "no Android SDK found (looked at ANDROID_HOME, ANDROID_SDK_ROOT," >&2
+    echo "$HOME/android-sdk and /usr/lib/android-sdk)." >&2
+    echo "install the packages the app compiles against, then retry:" >&2
+    echo "  sdkmanager \"platforms;android-35\" \"build-tools;35.0.0\" \"platform-tools\"" >&2
+    exit 1
+fi
+export ANDROID_HOME=$sdk ANDROID_SDK_ROOT=$sdk
+echo "sdk: $sdk"
+
+if ! grep -qx "sdk.dir=$sdk" "$android/local.properties" 2>/dev/null; then
+    printf 'sdk.dir=%s\n' "$sdk" > "$android/local.properties"
+fi
+
+args=()
+if [ -x "${PREFIX:-/nonexistent}/bin/aapt2" ]; then
+    if ! grep -qs 'aapt2FromMavenOverride' \
+        "$android/gradle.properties" "$HOME/.gradle/gradle.properties"; then
+        args+=("-Pandroid.aapt2FromMavenOverride=$PREFIX/bin/aapt2")
+        echo "aapt2: $PREFIX/bin/aapt2"
+    fi
+fi
+if $offline; then
+    args+=(--offline)
+fi
+
+cd "$android"
+
+# --- build ---------------------------------------------------------------------
+# One Gradle invocation for both APKs: the test APK shares everything the app
+# APK already produced.  Both must be built here rather than mixed with a CI
+# artifact, because CI signs each run with its own debug keystore and adb then
+# refuses the instrumentation with a Permission Denial.
+echo "== build =="
+start=$SECONDS
+./gradlew ${args[@]+"${args[@]}"} assembleDebug assembleDebugAndroidTest
+built=$((SECONDS - start))
+
+apk=$android/app/build/outputs/apk/debug/app-debug.apk
+test_apk=$android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+for f in "$apk" "$test_apk"; do
+    [ -f "$f" ] || { echo "gradle reported success but $f is missing" >&2; exit 1; }
+done
+echo "   built in ${built}s"
+echo "   app:  $(wc -c < "$apk") bytes"
+echo "   test: $(wc -c < "$test_apk") bytes"
+
+# --- end-to-end suite ----------------------------------------------------------
+if $run_tests; then
+    echo
+    echo "== end-to-end suite =="
+    suite_start=$SECONDS
+    if ! bash "$root/test/android-e2e.sh" "$apk" "$test_apk"; then
+        echo "suite FAILED after $((SECONDS - suite_start))s" >&2
+        exit 1
+    fi
+    echo "   suite in $((SECONDS - suite_start))s"
+else
+    echo
+    echo "tests skipped; run them with:"
+    echo "  bash test/android-e2e.sh \"$apk\" \"$test_apk\""
+fi
+
+echo
+echo "build ${built}s, total $((SECONDS - start))s"

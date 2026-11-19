@@ -52,6 +52,17 @@ uninstall delete credentials, sessions and settings instead of keeping them.
 uninstall report that the command was sent - they run visibly in Termux, which
 writes its output to the same file when it finishes.
 
+### Building and testing on the device
+
+The workflow in `.github/workflows/android.yml` is still the compiler of record, but a change can be built and checked here without pushing:
+
+```bash
+pkg install aapt2                 # Google only ships aapt2 for x86_64
+bash test/local-build.sh          # build both APKs, then run the e2e suite
+```
+
+`test/local-build.sh` finds the SDK, writes the git-ignored `android/local.properties`, points the Android Gradle Plugin at Termux's aarch64 `aapt2`, and hands both APKs to `test/android-e2e.sh`. Both APKs must be built by the same run: CI signs each one with its own throwaway debug keystore, so a locally built app paired with a CI test APK fails immediately with a permission denial. A local build is also not byte-identical to CI's, because aapt2 16.0.0.4 packages resources differently — the reproducible release job stays the authority for that.
+
 F-Droid packaging lives in [`fdroiddata/`](fdroiddata/): the metadata recipe, the submission notes, and the reproducibility settings the release build uses.
 
 Then:
