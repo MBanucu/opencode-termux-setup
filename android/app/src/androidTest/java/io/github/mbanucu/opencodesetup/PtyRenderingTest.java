@@ -95,6 +95,78 @@ public final class PtyRenderingTest {
                 longest < 100);
     }
 
+    @Test
+    public void cursorUpRewritesTheLineAboveInsteadOfAddingOne() throws Exception {
+        // Two lines, then the cursor is moved back up to the second one and that
+        // whole row is erased and rewritten: the state to get wrong is the row the
+        // cursor is on, not the one it started from.
+        render("first line\nsecond line\n\u001b[1A\u001b[2K\rrewritten\n");
+        String shown = awaitScreen(text -> text.contains("rewritten"));
+        assertFalse("the line the cursor moved up to was replaced",
+                shown.contains("second line"));
+        assertTrue("the untouched line above it is still there", shown.contains("first line"));
+    }
+
+    @Test
+    public void clearingTheScreenRemovesEveryLineItHad() throws Exception {
+        // ESC[2J erases the display, ESC[H puts the cursor back at the top; both
+        // are multi-line operations, unlike the single-row erase above.
+        render("alpha\nbeta\ngamma\n\u001b[2J\u001b[Hcleared\n");
+        String shown = awaitScreen(text -> text.contains("cleared"));
+        assertFalse("no earlier line survived the clear", shown.contains("alpha")
+                || shown.contains("beta") || shown.contains("gamma"));
+    }
+
+    @Test
+    public void moreLinesThanTheScreenKeepsTheTailAndDropsTheOldest() throws Exception {
+        StringBuilder pty = new StringBuilder();
+        for (int row = 1; row <= 100; row++) {
+            pty.append("row ").append(row).append(" of 100\n");
+        }
+        render(pty.toString());
+        String shown = awaitScreen(text -> text.contains("row 100 of 100"));
+        assertFalse("the first row scrolled out of the window that is published",
+                shown.contains("row 1 of 100"));
+        assertTrue("what remains is still in order",
+                shown.indexOf("row 90 of 100") < shown.indexOf("row 100 of 100"));
+    }
+
+    @Test
+    public void aCarriageReturnAfterAWrapRewritesOnlyTheWrappedRow() throws Exception {
+        // This is the phone-width case that used to break: text wraps into a
+        // second row, and the carriage return belongs to that row, not to where
+        // the line began.
+        render("z".repeat(200) + "\rEND\n");
+        String shown = awaitScreen(text -> text.contains("END"));
+        int wrappedRows = 0;
+        boolean endsOnWrappedRow = false;
+        for (String line : shown.split("\n")) {
+            if (line.contains("z")) {
+                wrappedRows++;
+            }
+            if (line.startsWith("END")) {
+                endsOnWrappedRow = true;
+            }
+        }
+        assertTrue("the long line still occupies more than one row, got " + wrappedRows,
+                wrappedRows >= 2);
+        assertTrue("the carriage return landed on the row the text wrapped into",
+                endsOnWrappedRow);
+    }
+
+    @Test
+    public void aLineFeedStartsTheNextLineAtColumnZero() throws Exception {
+        // A raw PTY sends \r\n; a bundle that lost the \r would indent the next
+        // line by the length of the one before it.
+        render("abc\ndef\n");
+        String shown = awaitScreen(text -> text.contains("def"));
+        boolean atColumnZero = false;
+        for (String line : shown.split("\n")) {
+            atColumnZero |= line.equals("def");
+        }
+        assertTrue("the second line starts at column zero", atColumnZero);
+    }
+
     /** Starts the terminal page with these bytes and nothing else to run. */
     private void render(String ptyBytes) {
         Intent probe = new Intent(context, TerminalActivity.class)

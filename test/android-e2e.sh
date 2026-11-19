@@ -113,6 +113,8 @@ run_phase() {
 
 if [ -n "$only" ]; then
     echo "== $only (one test) =="
+    # The grant the phases below rely on, so a single test starts the same way.
+    adb shell "pm grant $pkg com.termux.permission.RUN_COMMAND" >/dev/null 2>&1 || true
     single_log=$(mktemp)
     run_phase "$only" "$single_log"
     grep -qE '^OK \([0-9]+ tests?\)' "$single_log" || {
@@ -152,10 +154,12 @@ echo "== PTY rendering (carriage returns, escapes, wrapping) =="
 # Raw bytes are written into the real terminal page and the screen it publishes
 # is asserted: a carriage return must overwrite, SGR must not print, ESC[2K must
 # erase, a backspace must step back, and a line longer than the terminal must
-# wrap. One case per class method, five in all.
+# wrap - including the multi-line cases: cursor-up rewriting, clearing the whole
+# screen, scrolling past the screen, and a carriage return after a wrap. One case
+# per class method, ten in all.
 pty_render_log=$(mktemp)
 run_phase "$pkg.PtyRenderingTest" "$pty_render_log"
-grep -q 'OK (5 tests)' "$pty_render_log" || { echo "PTY rendering tests FAILED" >&2; exit 1; }
+grep -q 'OK (10 tests)' "$pty_render_log" || { echo "PTY rendering tests FAILED" >&2; exit 1; }
 
 echo "== denial path (permission revoked, separate run) =="
 # Revoking a dangerous permission kills the target process, hence a second run.
