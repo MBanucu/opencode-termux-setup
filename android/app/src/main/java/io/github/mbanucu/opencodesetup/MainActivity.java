@@ -32,13 +32,6 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
     private static final int REQUEST_RUN_COMMAND = 1;
     private static final String TAG = "OpencodeSetup";
 
-    private static final String CHECK_COMMAND =
-            "opencode --version 2>/dev/null || echo 'opencode is not installed'";
-
-    private static final String INSTALL_COMMAND =
-            "curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/install.sh"
-                    + " | bash";
-
     private TextView status;
     private TextView output;
     private Runnable pending;
@@ -154,7 +147,7 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
                 .setMessage(R.string.consent_message)
                 .setNegativeButton(R.string.consent_cancel, null)
                 .setPositiveButton(R.string.consent_accept,
-                        (dialog, which) -> start(INSTALL_COMMAND,
+                        (dialog, which) -> start(Commands.INSTALL,
                                 "Install opencode",
                                 "Add the opencode apt repository and install opencode",
                                 false))
@@ -165,7 +158,7 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
         if (!requireTermux()) {
             return;
         }
-        start(CHECK_COMMAND, "Check opencode", "Report the installed opencode version", true);
+        start(Commands.CHECK, "Check opencode", "Report the installed opencode version", true);
     }
 
     private void openTermux() {

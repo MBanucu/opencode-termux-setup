@@ -28,10 +28,6 @@ import android.widget.TextView;
  */
 public final class UninstallActivity extends Activity {
 
-    private static final String BASE =
-            "curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/uninstall.sh";
-    private static final String KEEP_COMMAND = BASE + " | bash";
-    private static final String PURGE_COMMAND = BASE + " | bash -s -- --purge";
     private static final int REQUEST_RUN_COMMAND = 2;
 
     private RadioButton keep;
@@ -152,13 +148,13 @@ public final class UninstallActivity extends Activity {
 
     private void showCommand() {
         preview.setText(getString(R.string.uninstall_preview) + "\n\n"
-                + (purging() ? PURGE_COMMAND : KEEP_COMMAND));
+                + (purging() ? Commands.UNINSTALL_PURGE : Commands.UNINSTALL));
     }
 
     // --- action --------------------------------------------------------------
 
     private void remove() {
-        String command = purging() ? PURGE_COMMAND : KEEP_COMMAND;
+        String command = purging() ? Commands.UNINSTALL_PURGE : Commands.UNINSTALL;
         if (checkSelfPermission(TermuxCommands.PERMISSION) != PackageManager.PERMISSION_GRANTED) {
             pending = () -> send(command);
             requestPermissions(new String[] {TermuxCommands.PERMISSION}, REQUEST_RUN_COMMAND);

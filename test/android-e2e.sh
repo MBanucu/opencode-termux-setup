@@ -40,7 +40,7 @@ setup_log=$(mktemp)
  echo "== setup flow (permission granted) =="
 adb shell "pm grant $pkg com.termux.permission.RUN_COMMAND" || true
 adb shell am instrument -w -e class "$pkg.SetupFlowTest" "$runner" | tee "$setup_log"
-grep -q 'OK (5 tests)' "$setup_log" || { echo "setup flow FAILED" >&2; exit 1; }
+grep -q 'OK (6 tests)' "$setup_log" || { echo "setup flow FAILED" >&2; exit 1; }
 
 echo "== denial path (permission revoked, separate run) =="
 # Revoking a dangerous permission kills the target process, hence a second run.

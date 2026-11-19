@@ -18,7 +18,12 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.MethodSorters;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
@@ -219,6 +224,32 @@ public final class SetupFlowTest {
         shot("08-installed.png");
     }
 
+    /**
+     * The adb entry point runs the same commands as the UI.
+     *
+     * <p>{@code AdbCommandActivity} is exported for exactly this, and it answers
+     * through {@code last-result.txt} in the app's external files directory,
+     * which adb can read without root. Here the test reads the same file the
+     * shell would, after starting the activity the way a script would.
+     */
+    @Test
+    public void fAdbEndpointRunsTheSameCommands() throws Exception {
+        File result = new File(InstrumentationRegistry.getInstrumentation()
+                .getTargetContext().getExternalFilesDir(null), "last-result.txt");
+        assertTrue("old answer cleared", !result.exists() || result.delete());
+
+        device.executeShellCommand("am start -W -n " + PACKAGE + "/.AdbCommandActivity"
+                + " -e command check");
+        String report = awaitFile(result,
+                text -> CHECK_INSTALLED.matcher(text.trim()).matches(), 30_000);
+        assertNotNull("adb check returns Termux's real answer, not an acknowledgement", report);
+
+        device.executeShellCommand("am start -W -n " + PACKAGE + "/.AdbCommandActivity"
+                + " -e command bogus");
+        String error = awaitFile(result, text -> text.contains("unknown command"), 15_000);
+        assertNotNull("an unknown command is refused with a reason", error);
+    }
+
     // --- helpers -------------------------------------------------------------
 
     private void bringToFront() throws Exception {
@@ -271,6 +302,41 @@ public final class SetupFlowTest {
         fail("Termux never answered " + wanted + " within " + (budget / 1000)
                 + "s; the last answer was: " + report);
         return report;
+    }
+
+    /**
+     * Waits for a file to say something acceptable. This is the one place the
+     * suite polls, because the answer is a file rather than a UI node: the adb
+     * path has no accessibility tree to subscribe to.
+     */
+    private String awaitFile(File file, Predicate<String> acceptable, long budget)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + budget;
+        while (System.currentTimeMillis() < deadline) {
+            String text = read(file);
+            if (text != null && acceptable.test(text)) {
+                return text;
+            }
+            Thread.sleep(250);
+        }
+        return null;
+    }
+
+    private String read(File file) {
+        if (!file.isFile()) {
+            return null;
+        }
+        try (InputStream in = new FileInputStream(file)) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = in.read(buffer)) > 0) {
+                out.write(buffer, 0, count);
+            }
+            return out.toString("UTF-8");
+        } catch (IOException unreadable) {
+            return null;
+        }
     }
 
     private void shot(String name) throws Exception {

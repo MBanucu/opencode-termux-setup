@@ -37,7 +37,7 @@ the latest release.
 
 ## Constraints kept from the reference app
 
-- **No dependencies.** No AndroidX, no networking, no analytics — two small
+- **No dependencies.** No AndroidX, no networking, no analytics — three small
   activities plus one `BroadcastReceiver`, so `assembleDebug` needs only the SDK.
 - **One permission**, `com.termux.permission.RUN_COMMAND`, owned by Termux. It is
   requested at the moment of use, and a denial is explained instead of retried.
@@ -67,7 +67,9 @@ assertion comes from a screenshot.
   installed`; **Start setup really installs**: after that removal it downloads
   and installs opencode again and passes only once Termux reports a version with
   `exit code 0`. So the suite runs with no opencode on the device and leaves one
-  behind.
+  behind. **adb parity**: `AdbCommandActivity` is started the way a script would
+  start it and its `last-result.txt` must carry Termux's real answer, and an
+  unknown command must be refused with a reason.
 
 Both real operations are asynchronous in Termux, so their budget is measured in
 what they actually do: up to 5 minutes for a removal (apt lock and package swap)
@@ -95,12 +97,35 @@ debug keystore on every run, so a test APK from one run does not match an app AP
 from another, and `am instrument` refuses with `does not have a signature
 matching the target`.
 
+## From adb
+
+`AdbCommandActivity` is exported so every action is reachable from a script; it
+sends the same commands the buttons do and writes the answer to
+`last-result.txt` in the app's external files directory (also logged as
+`ADB_RESULT`).
+
+```bash
+adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity -e command check
+adb shell cat /sdcard/Android/data/io.github.mbanucu.opencodesetup/files/last-result.txt
+adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity -e command uninstall --ez purge true
+```
+
+It is an activity rather than a broadcast receiver because starting a service in
+another app from a background receiver is refused on modern Android, so the
+dispatch has to happen while this app is in the foreground. `command` takes
+`install`, `uninstall` or `check`; `purge` turns the uninstall into
+`uninstall.sh --purge`. Because it is exported, any app on the device can start
+it - it can only do what Termux allows, and the visible runner still shows every
+install or removal in the Termux window.
+
 ## Layout
 
 ```
 app/src/main/java/io/github/mbanucu/opencodesetup/
   MainActivity.java       # programmatic UI, consent dialog, RUN_COMMAND handoff
   UninstallActivity.java  # keep-or-delete page, one command per choice
+  AdbCommandActivity.java # the same actions for adb, answers through a file
+  Commands.java           # the command strings, defined once
   TermuxCommands.java     # the single place that builds a RUN_COMMAND intent
   RunCommandReceiver.java # parses Termux's result bundle
 app/src/main/res/values/  # strings (all user-facing text), theme

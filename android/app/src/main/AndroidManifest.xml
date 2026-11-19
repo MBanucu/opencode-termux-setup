@@ -40,6 +40,16 @@
             android:exported="false"
             android:label="@string/uninstall_title" />
 
+        <!-- adb entry point, so every action the UI offers is scriptable:
+               adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity -e command check
+             It is exported because adb needs that; it sends the same Termux
+             commands and has no other powers. -->
+        <activity
+            android:name=".AdbCommandActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true" />
+
         <!-- Termux answers the PendingIntent we hand it on this action. -->
         <receiver
             android:name=".RunCommandReceiver"

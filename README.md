@@ -32,6 +32,26 @@ bash install.sh
 
 It needs Termux's `allow-external-apps=true` in `~/.termux/termux.properties`; if Termux refuses the command, the app copies that line to the clipboard.
 
+### Or from adb
+
+Every action the app offers is scriptable, so it can run headless:
+
+```bash
+adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity -e command check
+adb shell cat /sdcard/Android/data/io.github.mbanucu.opencodesetup/files/last-result.txt
+# opencode v2.3.2
+# exit code 0
+
+adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity \
+  -e command uninstall --ez purge true
+```
+
+`-e command` takes `install`, `uninstall` or `check`; `--ez purge true` makes an
+uninstall delete credentials, sessions and settings instead of keeping them.
+`check` fills `last-result.txt` with Termux's real answer, while install and
+uninstall report that the command was sent - they run visibly in Termux, which
+writes its output to the same file when it finishes.
+
 F-Droid packaging lives in [`fdroiddata/`](fdroiddata/): the metadata recipe, the submission notes, and the reproducibility settings the release build uses.
 
 Then:
