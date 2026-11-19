@@ -85,6 +85,8 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private volatile int columns;
     private volatile int rows;
     private volatile boolean streamed;
+    /** True while a command runs: accessibility updates wait until it ends. */
+    private boolean commandRunning;
     // A command waiting for the terminal to report its size: run as soon as that
     // size arrives, or unconditionally after a few seconds.
     private Runnable pendingSend;
@@ -124,12 +126,31 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             back.setOnClickListener(v -> finish());
             column.addView(back);
         }
+
+        announceReady();
+    }
+
+    /**
+     * Says the page is on screen and laid out: once when it is created, and
+     * again every time it comes back to the front. The suite waits for this
+     * line instead of polling accessibility, which cost it a whole hierarchy
+     * snapshot for every page it opened.
+     */
+    private void announceReady() {
+        View content = findViewById(android.R.id.content);
+        if (content != null) {
+            content.post(() ->
+                    Diagnostics.log(this, "page:" + getClass().getSimpleName() + " ready"));
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         RunCommandReceiver.setListener(this);
+        // A page that is brought forward again was already laid out; this line
+        // is how the suite knows the tap has somewhere to land.
+        announceReady();
     }
 
     /**
@@ -643,6 +664,12 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
      * able to start a second apt transaction on top of the first.
      */
     protected void running(boolean active) {
+        commandRunning = active;
+        if (!active && output != null && screen != null) {
+            // The stream has stopped: the finished screen goes to accessibility
+            // once, where a screen reader can read it in full.
+            output.setContentDescription(screen);
+        }
         for (Button button : actionButtons) {
             button.setEnabled(!active);
         }
@@ -798,8 +825,12 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                     Log.w(TAG, "could not write live output", unwritable);
                 }
             }
+            // While a command streams, this is four accessibility events a
+            // second, and the stream never goes quiet - which is what UiAutomator
+            // waits for before it taps, so every click then waited out its idle
+            // timeout. The last screen is published once, when the command ends.
             ui.post(() -> {
-                if (output != null) {
+                if (output != null && !commandRunning) {
                     output.setContentDescription(text);
                 }
             });

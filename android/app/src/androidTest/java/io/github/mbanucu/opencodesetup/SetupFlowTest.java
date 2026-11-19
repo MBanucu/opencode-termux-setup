@@ -342,17 +342,35 @@ public final class SetupFlowTest {
      * task forward, so the page never changes.
      */
     private void bringToFront() throws Exception {
-        // Started in-process, not through a shell: the flags say close the task
-        // and start the main page fresh, and no command needs to be parsed for
-        // that to happen.
+        long mark = eventsMark();
+        // Reopened, not restarted: CLEAR_TOP finishes whatever pages sit above
+        // the main one, and SINGLE_TOP hands the intent to the instance that is
+        // already there instead of destroying and rebuilding it. A clear-task
+        // start closed the whole app and paid for a fresh page every time.
         InstrumentationRegistry.getInstrumentation().getTargetContext().startActivity(
                 new Intent(Intent.ACTION_MAIN)
                         .setClassName(PACKAGE, PACKAGE + ".MainActivity")
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                                | Intent.FLAG_ACTIVITY_CLEAR_TASK));
-        scrollToTop();
+                                | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+        // The app says when the page has been laid out, and a file read is
+        // cheaper than the accessibility snapshot this used to poll for.
+        awaitPage(mark, "MainActivity", SHORT);
         assertTrue("the app is in the foreground, with its actions in view: " + diagnosis(),
-                device.wait(Until.hasObject(By.text("Check setup")), SHORT));
+                scrollToTop());
+    }
+
+    /** Waits for the app to say a page has been laid out, read from its own log. */
+    private void awaitPage(long mark, String name, long budget) throws Exception {
+        long deadline = System.currentTimeMillis() + budget;
+        String wanted = "page:" + name + " ready";
+        while (System.currentTimeMillis() < deadline) {
+            if (eventsSince(mark).contains(wanted)) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        fail("the " + name + " page never said it was laid out: " + diagnosis());
     }
 
     /**
@@ -363,7 +381,7 @@ public final class SetupFlowTest {
      * tree. Pressing them means scrolling up first, exactly as a person would -
      * otherwise the lookup is null for a page that is behaving correctly.
      */
-    private void scrollToTop() {
+    private boolean scrollToTop() {
         int width = device.getDisplayWidth();
         int height = device.getDisplayHeight();
         for (int swipe = 0; swipe < 3; swipe++) {
@@ -371,11 +389,12 @@ public final class SetupFlowTest {
             // comes into view can leave "Install opencode" just above the edge.
             if (device.hasObject(By.text("Install opencode"))
                     && device.hasObject(By.text("Check setup"))) {
-                return;
+                return true;
             }
             device.swipe(width / 2, height / 5, width / 2, height * 4 / 5, 20);
             device.waitForIdle();
         }
+        return false;
     }
 
     /** Fails at the moment output should have started, quoting what happened. */
@@ -456,10 +475,13 @@ public final class SetupFlowTest {
         if (check == null) {
             fail("the check button is not on screen: " + diagnosis());
         }
+        long opened = eventsMark();
         check.click();
 
-        // The check has its own page now; the command is started from there.
-        UiObject2 run = device.wait(Until.findObject(By.text("Run check")), SHORT);
+        // The check has its own page now; the command is started from there. It
+        // announces its layout, so one lookup is enough once it has.
+        awaitPage(opened, "CheckActivity", SHORT);
+        UiObject2 run = device.findObject(By.text("Run check"));
         if (run == null) {
             fail("the check page offers no run action: " + diagnosis());
         }
