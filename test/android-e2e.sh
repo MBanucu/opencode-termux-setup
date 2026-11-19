@@ -5,9 +5,8 @@
 #   bash test/android-e2e.sh [app-debug.apk] [app-debug-androidTest.apk]
 #
 # Needs: adb in PATH, the device authorised, Termux installed with
-# allow-external-apps=true. Build the two APKs with
-#   cd android && ./gradlew assembleDebug assembleDebugAndroidTest
-#
+# allow-external-apps=true. python3 is optional: it only adds the timing history
+# in test/.timings.db and the estimate printed while the tests run.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -15,10 +14,18 @@ apk=${1:-$root/android/app/build/outputs/apk/debug/app-debug.apk}
 test_apk=${2:-$root/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk}
 pkg=io.github.mbanucu.opencodesetup
 runner=$pkg.test/androidx.test.runner.AndroidJUnitRunner
+timings=$root/test/timings.py
+timings_db=$root/test/.timings.db
 
 for f in "$apk" "$test_apk"; do
     [ -f "$f" ] || { echo "missing $f (build it first)" >&2; exit 1; }
 done
+
+# Timings are a convenience: without python3 the tests run and pass as before.
+timing=false
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import sqlite3' >/dev/null 2>&1; then
+    timing=true
+fi
 
 echo "== device =="
 adb wait-for-device
@@ -36,20 +43,86 @@ adb install "$test_apk"
 # mktemp honours TMPDIR: Termux has no writable /tmp, so a hard-coded path made
 # tee fail and took the whole run down before the second class.
 setup_log=$(mktemp)
+denied_log=$(mktemp)
+timing_log=$(mktemp)
+run_id=$(date +%s)
+logcat_pid=""
+watcher_pid=""
 
- echo "== setup flow (permission granted) =="
+cleanup() {
+    [ -n "$watcher_pid" ] && kill "$watcher_pid" >/dev/null 2>&1 || true
+    [ -n "$logcat_pid" ] && kill "$logcat_pid" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+if $timing; then
+    # One stream for the whole session; each test logs its own duration.
+    adb shell logcat -c >/dev/null 2>&1 || true
+    adb logcat -s OpencodeSetup:I > "$timing_log" 2>/dev/null &
+    logcat_pid=$!
+fi
+
+estimate() {
+    python3 "$timings" eta --class "$1" --run "$run_id" --log "$timing_log" \
+        --db "$timings_db" 2>/dev/null || true
+}
+
+predict() {
+    # A run id that never executes, so every test counts as still to come.
+    python3 "$timings" eta --class "$1" --run "plan-$run_id" --db "$timings_db" \
+        2>/dev/null || true
+}
+
+start_estimates() {
+    $timing || return 0
+    ( while :; do estimate "$1"; sleep 5; done ) &
+    watcher_pid=$!
+}
+
+stop_estimates() {
+    [ -n "$watcher_pid" ] && kill "$watcher_pid" >/dev/null 2>&1 || true
+    watcher_pid=""
+}
+
+# Runs one instrumentation class, printing the estimate from history while it
+# runs and recording afterwards what each test actually took. The result is
+# judged by the caller from the runner's own output.
+run_phase() {
+    local class=$1 log=$2
+    start_estimates "$class"
+    adb shell am instrument -w -e class "$class" -e runId "$run_id" "$runner" \
+        | tee "$log" || true
+    stop_estimates
+    if $timing; then
+        python3 "$timings" record --log "$timing_log" --run "$run_id" --db "$timings_db" \
+            || true
+    fi
+}
+
+echo "== setup flow (permission granted) =="
 adb shell "pm grant $pkg com.termux.permission.RUN_COMMAND" || true
-adb shell am instrument -w -e class "$pkg.SetupFlowTest" "$runner" | tee "$setup_log"
+if $timing; then
+    predict "$pkg.SetupFlowTest"
+else
+    echo "(python3 not found: no timing history this run)"
+fi
+run_phase "$pkg.SetupFlowTest" "$setup_log"
 grep -q 'OK (6 tests)' "$setup_log" || { echo "setup flow FAILED" >&2; exit 1; }
 
 echo "== denial path (permission revoked, separate run) =="
 # Revoking a dangerous permission kills the target process, hence a second run.
 adb shell "pm revoke $pkg com.termux.permission.RUN_COMMAND" || true
-denied_log=$(mktemp)
-adb shell am instrument -w -e class "$pkg.PermissionDeniedTest" "$runner" | tee "$denied_log"
+run_phase "$pkg.PermissionDeniedTest" "$denied_log"
 grep -q 'OK (1 test)' "$denied_log" || { echo "denial path FAILED" >&2; exit 1; }
 
 echo
 echo "both runs passed"
+
+if $timing; then
+    echo
+    echo "== timings (test/.timings.db) =="
+    python3 "$timings" history --db "$timings_db" || true
+fi
+
 echo "screenshots are in the app's external files dir:"
 adb shell "ls /sdcard/Android/data/$pkg/files/screenshots" 2>/dev/null || true

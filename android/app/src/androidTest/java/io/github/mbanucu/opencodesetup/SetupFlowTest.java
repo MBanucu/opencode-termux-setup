@@ -14,6 +14,7 @@ import androidx.test.uiautomator.Until;
 
 import org.junit.Before;
 import org.junit.FixMethodOrder;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.MethodSorters;
@@ -88,6 +89,10 @@ public final class SetupFlowTest {
             Pattern.compile("(?s)^opencode v\\S+\\n+\\nexit code 0$");
 
     private UiDevice device;
+
+    /** Logs this test's duration; the harness keeps those in its database. */
+    @Rule
+    public final TestTimings timings = new TestTimings();
 
     @Before
     public void openApp() throws Exception {

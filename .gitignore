@@ -1,0 +1,2 @@
+# Test timing history is local to the machine that ran the tests.
+test/.timings.db

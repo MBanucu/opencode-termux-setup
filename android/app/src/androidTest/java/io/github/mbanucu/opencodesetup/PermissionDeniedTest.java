@@ -11,6 +11,7 @@ import androidx.test.uiautomator.UiObject2;
 import androidx.test.uiautomator.Until;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -34,6 +35,10 @@ public final class PermissionDeniedTest {
     private static final long SHORT = 10_000;
 
     private UiDevice device;
+
+    /** Logs this test's duration; the harness keeps those in its database. */
+    @Rule
+    public final TestTimings timings = new TestTimings();
 
     @Before
     public void openApp() throws Exception {
