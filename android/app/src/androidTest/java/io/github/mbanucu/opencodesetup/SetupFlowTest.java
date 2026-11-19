@@ -446,6 +446,9 @@ public final class SetupFlowTest {
                 && awaitFile(liveOutputFile(), value -> value.contains(firstLine), SHORT) == null) {
             fail("Termux answered but the page does not show it: " + diagnosis());
         }
+        // The check has a page of its own, so leaving it is part of asking: the
+        // caller's next action is on the main screen.
+        bringToFront();
         return text;
     }
 
