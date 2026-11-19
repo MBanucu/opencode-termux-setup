@@ -19,7 +19,7 @@ Filed with `glab` on this device (authenticated as `MBanucu`). The fork
 the two metadata files went onto branch `opencode-setup` there through the
 commits API.
 
-### Two endpoint quirks worth knowing
+### Endpoint and scanner quirks worth knowing
 
 - `POST /projects/fdroid%2Ffdroiddata/merge_requests` answers `403 Forbidden` for
   this account — the same minimal payload, `Content-Length: 27`, and far from any
@@ -49,6 +49,19 @@ commits API.
   `fdroid/rfp`, and `PUT`s the merge request. No scope setting removes the 403;
   what would is membership of the parent project, which is the maintainers'
   call.
+
+- `fdroid build` refuses Maven hosts it does not recognise. The first pipeline
+  died before Gradle started on
+  `Found unknown maven repo 'https://maven-central.storage-download.googleapis.com/maven2/' at android/settings.gradle.kts`:
+  that mirror had been added to dodge the 429s hosted CI gets from Maven Central.
+  Keep to `google()`, `mavenCentral()` and `gradlePluginPortal()`, and rely on the
+  Gradle repository retry properties instead.
+
+  Note where the fix had to go: fdroiddata builds the **tag**, not the MR branch,
+  so correcting the tag is what made `fdroid build` pass. The MR branch carries
+  only metadata; `android-v0.1.0` was re-pointed at the fixed commit with
+  `git tag -f` plus a force-push, which is acceptable only because nothing had
+  been published from it yet.
 
 ## Opening the next one by hand
 

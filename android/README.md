@@ -41,6 +41,32 @@ the latest release.
 - **No privileged work.** Adding an apt source and installing a package is the
   installer's job, run with the user's own Termux shell.
 
+## Tests
+
+`app/src/androidTest/` drives the real app through **UI Automator**, which is the
+accessibility event stream: waits are `Until.hasObject` / `Until.findObject` /
+`Until.gone`, so a step resolves the moment the UI changes instead of after a
+sleep, and the nodes a screen reader would see are what the tests match on. No
+assertion comes from a screenshot.
+
+- `SetupFlowTest` — the main screen offers the three actions; the consent dialog
+  names the repository, the sizes and the command, and cancel closes it without
+  side effects; "Check setup" round-trips a real `RUN_COMMAND` through Termux and
+  back into the output view (`exit code 0`).
+- `PermissionDeniedTest` — a second run on purpose, because revoking a dangerous
+  permission kills the process the runner lives in: Android asks for
+  `com.termux.permission.RUN_COMMAND`, and a denial produces the explanation with
+  a link to the app settings.
+
+```bash
+cd android && ./gradlew assembleDebug assembleDebugAndroidTest
+bash ../test/android-e2e.sh      # adb install + am instrument, both runs
+```
+
+CI compiles both APKs on every push (`assembleDebugAndroidTest`) and uploads the
+test APK, so a test that stops compiling cannot land. Running them needs a device
+or emulator.
+
 ## Layout
 
 ```

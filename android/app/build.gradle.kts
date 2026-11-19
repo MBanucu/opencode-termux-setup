@@ -12,6 +12,9 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        // The instrumented end-to-end tests drive the app through UI Automator,
+        // which is the accessibility event stream, not screenshots.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -44,4 +47,13 @@ android {
         abortOnError = true
         warningsAsErrors = false
     }
+}
+
+// Test-only, and never packaged: UI Automator and the runner live in the
+// separate androidTest APK.
+dependencies {
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }

@@ -53,17 +53,23 @@ jobs:
         working-directory: android
         run: ./gradlew --version | sed -n '1,8p'
 
+      # assembleDebugAndroidTest compiles the UI Automator end-to-end tests.  It
+      # does not run them: that needs a device or emulator, which is what
+      # test/android-e2e.sh does over adb.
       - name: Assemble
         working-directory: android
-        run: ./gradlew --no-daemon --stacktrace assembleDebug
+        run: ./gradlew --no-daemon --stacktrace assembleDebug assembleDebugAndroidTest
 
       - name: Report the apk
         working-directory: android
         run: |
-          apk=app/build/outputs/apk/debug/app-debug.apk
-          ls -l "$apk"
-          sha256sum "$apk"
-          "$sdk/build-tools/35.0.0/aapt2" dump badging "$apk" 2>/dev/null |
+          for apk in app/build/outputs/apk/debug/app-debug.apk \
+                     app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk; do
+            ls -l "$apk"
+            sha256sum "$apk"
+          done
+          "$sdk/build-tools/35.0.0/aapt2" dump badging \
+            app/build/outputs/apk/debug/app-debug.apk 2>/dev/null |
             grep -E '^(package|sdkVersion|targetSdkVersion|application-label|uses-permission)' |
             head -10 || true
 
@@ -71,6 +77,12 @@ jobs:
         with:
           name: opencode-setup-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opencode-setup-androidtest-apk
+          path: android/app/build/outputs/apk/androidTest/debug/*.apk
           if-no-files-found: error
 
       # Advisory while the app is young.
