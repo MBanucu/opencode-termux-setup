@@ -59,6 +59,17 @@ public final class TerminalHeightTest {
         for (float fraction : FRACTIONS) {
             openAt(fraction);
 
+            // The full buffer is measured first, because that is the case where a
+            // last line can be clipped: an overflowing terminal keeps its newest
+            // row against the bottom edge, a two line one does not.
+            String filled = settledTail();
+            assertNotNull("the filled terminal reports its last line at " + fraction, filled);
+            assertTrue("the last line of a full terminal has text at " + fraction + ": " + filled,
+                    !filled.contains("\"chars\":0"));
+            assertTrue("the last line of a full terminal ends inside it at " + fraction
+                            + ": " + filled,
+                    filled.contains("\"fits\":true"));
+
             UiObject2 check = device.wait(Until.findObject(By.text("Check setup")), SHORT);
             if (check == null) {
                 org.junit.Assert.fail("no check button at " + fraction + " of the screen");
@@ -66,6 +77,8 @@ public final class TerminalHeightTest {
             device.executeShellCommand("logcat -c");
             check.click();
 
+            // And again for the command's own output, which arrives with its own
+            // line endings and progress rewrites.
             String tail = settledTail();
             assertNotNull("the terminal reports where its last line ends at " + fraction, tail);
             assertTrue("the last line has text at " + fraction + ": " + tail,
@@ -73,7 +86,7 @@ public final class TerminalHeightTest {
             assertTrue("the last line ends inside the terminal at " + fraction + ": " + tail,
                     tail.contains("\"fits\":true"));
 
-            int height = heightOf(tail);
+            int height = heightOf(filled);
             assertTrue("the terminal height was reported at " + fraction + ": " + tail, height > 0);
             assertTrue("a pinned height differs from the previous one at " + fraction
                             + " (" + previous + " then " + height + ")",
