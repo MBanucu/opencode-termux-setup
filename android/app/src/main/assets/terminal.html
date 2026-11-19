@@ -84,9 +84,12 @@
     // An accessibility node does not carry an install's whole scrollback well:
     // the last lines are what a reader and the end-to-end test need, and a
     // check result is two of them.
-    return lines.slice(-60).join('\n');
+    return lines.slice(-40).join('\n');
   }
 
+  // Published once a second, not per chunk: every update is an accessibility
+  // event, and a terminal that fires four a second keeps UI Automator from
+  // getting a stable snapshot of the page.
   var last = '';
   setInterval(function () {
     var text = screenText();
@@ -94,7 +97,7 @@
       last = text;
       window.AndroidBridge.onScreen(text);
     }
-  }, 250);
+  }, 1000);
 })();
 </script>
 </body>
