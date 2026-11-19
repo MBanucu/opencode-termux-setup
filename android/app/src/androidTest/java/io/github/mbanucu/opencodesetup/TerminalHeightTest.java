@@ -82,9 +82,15 @@ public final class TerminalHeightTest {
         }
     }
 
-    /** Restarts the page with a pinned terminal height, as a test hook only. */
+    /**
+     * Opens the page with a pinned terminal height, as a test hook only.
+     *
+     * <p>There is deliberately no {@code am force-stop} here: the instrumentation
+     * runs inside this app's process, so stopping the package would stop the test
+     * before it could measure anything. A plain start adds a new page instance on
+     * top, and that instance reads the extra in {@code onCreate}.
+     */
     private void openAt(float fraction) throws Exception {
-        device.executeShellCommand("am force-stop " + PACKAGE);
         device.executeShellCommand("am start -W -n " + PACKAGE + "/.MainActivity"
                 + " --ef terminal_fraction " + fraction);
     }
