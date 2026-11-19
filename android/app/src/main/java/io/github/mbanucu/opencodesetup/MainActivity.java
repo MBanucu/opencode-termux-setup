@@ -3,7 +3,6 @@ package io.github.mbanucu.opencodesetup;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -30,12 +29,6 @@ import android.widget.TextView;
 @SuppressLint("SdCardPath") // the Termux paths are fixed by Termux, not by us
 public final class MainActivity extends Activity implements RunCommandReceiver.Listener {
 
-    private static final String TERMUX_PACKAGE = "com.termux";
-    private static final String RUN_COMMAND_SERVICE = "com.termux.app.RunCommandService";
-    private static final String RUN_COMMAND_ACTION = "com.termux.RUN_COMMAND";
-    private static final String TERMUX_BASH = "/data/data/com.termux/files/usr/bin/bash";
-    private static final String TERMUX_HOME = "/data/data/com.termux/files/home";
-    private static final String PERMISSION_RUN_COMMAND = "com.termux.permission.RUN_COMMAND";
     private static final int REQUEST_RUN_COMMAND = 1;
     private static final String TAG = "OpencodeSetup";
 
@@ -45,14 +38,6 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
     private static final String INSTALL_COMMAND =
             "curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/install.sh"
                     + " | bash";
-
-    private static final String UNINSTALL_COMMAND =
-            "curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/uninstall.sh"
-                    + " | bash";
-
-    private static final String ALLOW_EXTERNAL_APPS =
-            "echo 'allow-external-apps=true' >> ~/.termux/termux.properties"
-                    + " && termux-reload-settings";
 
     private TextView status;
     private TextView output;
@@ -105,7 +90,10 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
         column.addView(status);
 
         column.addView(button(R.string.action_install, v -> confirmSetup()));
-        column.addView(button(R.string.action_uninstall, v -> confirmUninstall()));
+        // Uninstalling is a decision with two very different outcomes, so it gets
+        // a page instead of a dialog.
+        column.addView(button(R.string.action_uninstall,
+                v -> startActivity(new Intent(this, UninstallActivity.class))));
         column.addView(button(R.string.action_check, v -> runCheck()));
         column.addView(button(R.string.action_open, v -> openTermux()));
 
@@ -173,22 +161,6 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
                 .show();
     }
 
-    private void confirmUninstall() {
-        if (!requireTermux()) {
-            return;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.uninstall_title)
-                .setMessage(R.string.uninstall_message)
-                .setNegativeButton(R.string.consent_cancel, null)
-                .setPositiveButton(R.string.uninstall_accept,
-                        (dialog, which) -> start(UNINSTALL_COMMAND,
-                                "Uninstall opencode",
-                                "Remove the opencode package and its apt repository",
-                                false))
-                .show();
-    }
-
     private void runCheck() {
         if (!requireTermux()) {
             return;
@@ -197,7 +169,7 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
     }
 
     private void openTermux() {
-        Intent launch = getPackageManager().getLaunchIntentForPackage(TERMUX_PACKAGE);
+        Intent launch = getPackageManager().getLaunchIntentForPackage(TermuxCommands.TERMUX_PACKAGE);
         if (launch != null) {
             startActivity(launch);
         } else {
@@ -206,12 +178,12 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
     }
 
     private void start(String command, String label, String description, boolean background) {
-        if (checkSelfPermission(PERMISSION_RUN_COMMAND) != PackageManager.PERMISSION_GRANTED) {
-            Log.i(TAG, "asking for " + PERMISSION_RUN_COMMAND);
+        if (checkSelfPermission(TermuxCommands.PERMISSION) != PackageManager.PERMISSION_GRANTED) {
+            Log.i(TAG, "asking for " + TermuxCommands.PERMISSION);
             // RUN_COMMAND is a dangerous permission owned by Termux; without it
             // startService throws and the reason looks like a settings problem.
             pending = () -> send(command, label, description, background);
-            requestPermissions(new String[] {PERMISSION_RUN_COMMAND}, REQUEST_RUN_COMMAND);
+            requestPermissions(new String[] {TermuxCommands.PERMISSION}, REQUEST_RUN_COMMAND);
             return;
         }
         send(command, label, description, background);
@@ -234,32 +206,8 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
     }
 
     private void send(String command, String label, String description, boolean background) {
-        PendingIntent result = PendingIntent.getBroadcast(this, 0,
-                new Intent(RunCommandReceiver.ACTION_RESULT).setPackage(getPackageName()),
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
-
-        Intent intent = new Intent();
-        intent.setClassName(TERMUX_PACKAGE, RUN_COMMAND_SERVICE);
-        intent.setAction(RUN_COMMAND_ACTION);
-        intent.putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_BASH);
-        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-lc", command});
-        intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", TERMUX_HOME);
-        // A background command reports its output through the PendingIntent; a
-        // visible one runs in the Termux window, and this Termux also delivers
-        // its output when it finishes, so the app shows whatever arrives.
-        // Current Termux picks the runner; the boolean is the older spelling of
-        // the same choice and is still honoured as a fallback.
-        intent.putExtra("com.termux.RUN_COMMAND_RUNNER",
-                background ? "app-shell" : "terminal-session");
-        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", background);
-        intent.putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0");
-        intent.putExtra("com.termux.RUN_COMMAND_COMMAND_LABEL", label);
-        intent.putExtra("com.termux.RUN_COMMAND_COMMAND_DESCRIPTION", description);
-        intent.putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", result);
-
         try {
-            startService(intent);
-            Log.i(TAG, "sent " + (background ? "app-shell" : "terminal-session") + ": " + label);
+            TermuxCommands.send(this, command, label, description, background);
         } catch (RuntimeException refused) {
             Log.w(TAG, "Termux refused the command", refused);
             showPermissionHelp();
@@ -278,7 +226,7 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
 
     private boolean isTermuxInstalled() {
         try {
-            getPackageManager().getPackageInfo(TERMUX_PACKAGE, 0);
+            getPackageManager().getPackageInfo(TermuxCommands.TERMUX_PACKAGE, 0);
             return true;
         } catch (PackageManager.NameNotFoundException absent) {
             return false;
@@ -309,11 +257,11 @@ public final class MainActivity extends Activity implements RunCommandReceiver.L
     }
 
     private void showPermissionHelp() {
-        copy(ALLOW_EXTERNAL_APPS);
+        copy(TermuxCommands.ALLOW_EXTERNAL_APPS);
         new AlertDialog.Builder(this)
                 .setTitle(R.string.permission_title)
                 .setMessage(getString(R.string.permission_message)
-                        + "\n\n" + ALLOW_EXTERNAL_APPS)
+                        + "\n\n" + TermuxCommands.ALLOW_EXTERNAL_APPS)
                 .setPositiveButton(R.string.dialog_close, null)
                 .show();
     }

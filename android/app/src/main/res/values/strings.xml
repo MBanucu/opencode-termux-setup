@@ -30,16 +30,13 @@ Nothing is uploaded. Use Wi-Fi if mobile data is metered. You can cancel now and
     <string name="consent_cancel">Cancel</string>
 
     <string name="uninstall_title">Remove opencode?</string>
-    <string name="uninstall_message">Termux will run:
-
-curl -fsSL https://raw.githubusercontent.com/MBanucu/opencode-termux-setup/main/uninstall.sh | bash
-
-That removes the opencode package and the APT repository that install.sh added.
-
-Your provider credentials, sessions and settings in ~/.config/opencode and ~/.local/share/opencode are kept, so installing again picks up where you left off. The command prints those paths, and deleting them is a separate step.
-
-Nothing is uploaded. You can cancel now and run the same command by hand later.</string>
-    <string name="uninstall_accept">Remove</string>
+    <string name="uninstall_intro">This removes the opencode package and the APT repository that the installer added. Choose what happens to your data.</string>
+    <string name="uninstall_keep_title">Keep my settings</string>
+    <string name="uninstall_keep_detail">Your provider credentials, sessions and settings in ~/.config/opencode and ~/.local/share/opencode are kept, so installing again picks up where you left off.</string>
+    <string name="uninstall_purge_title">Remove everything</string>
+    <string name="uninstall_purge_detail">Also deletes those two directories: provider credentials, sessions and settings. Every provider has to be connected again, and sessions cannot be recovered.</string>
+    <string name="uninstall_preview">Termux will run:</string>
+    <string name="uninstall_confirm">Remove opencode</string>
 
     <string name="permission_title">Termux refused the command</string>
     <string name="permission_message">Termux only accepts commands from other apps when this is enabled in its own settings:

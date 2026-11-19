@@ -1,5 +1,6 @@
 package io.github.mbanucu.opencodesetup;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -30,18 +31,18 @@ import java.util.regex.Pattern;
  * {@code Until.gone} fires when it is removed.
  *
  * <p>The Termux side is real, and it is not simulated anywhere. "Uninstall
- * opencode" and "Install opencode" go out on the visible {@code terminal-session}
- * runner, so the event that proves the handoff is Termux's own window taking the
- * foreground; whether the command actually changed the system is then answered
- * by "Check setup", which runs {@code opencode --version} in Termux through the
- * background {@code app-shell} runner and reports the result back through a
+ * opencode" opens a page where the choice between keeping and deleting the
+ * user's data is made; both outcomes send their own command on the visible
+ * {@code terminal-session} runner, so the event that proves the handoff is
+ * Termux's own window taking the foreground. Whether the command actually
+ * changed the system is then answered by "Check setup", which runs
+ * {@code opencode --version} in Termux and reports the result back through a
  * {@code PendingIntent}. The suite therefore removes opencode from the device
  * and installs it again, asserting on the version each time.
  *
  * <p>Prerequisites on the device: Termux installed, {@code allow-external-apps=true}
  * in {@code ~/.termux/termux.properties}, network access, and this package
- * installed. Run with {@code test/android-e2e.sh}; the run takes as long as a
- * real 70 MB install does.
+ * installed. Run with {@code test/android-e2e.sh}.
  */
 @RunWith(AndroidJUnit4.class)
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
@@ -120,66 +121,80 @@ public final class SetupFlowTest {
                 !device.hasObject(By.pkg(TERMUX)));
     }
 
+    /**
+     * The uninstall page offers both outcomes and shows the command for each.
+     *
+     * <p>Nothing runs here: this is the page doing its job, including the fact
+     * that the safe choice is the one already selected.
+     */
     @Test
-    public void cUninstallConsentDialogStatesWhatIsRemoved() throws Exception {
+    public void cUninstallPageChoosesBetweenKeepingAndDeleting() throws Exception {
         device.findObject(By.text("Uninstall opencode")).click();
-        assertTrue("the uninstall dialog appears",
+        assertTrue("the uninstall page opens",
                 device.wait(Until.hasObject(By.text("Remove opencode?")), SHORT));
 
-        UiObject2 message = device.wait(
-                Until.findObject(By.textContains("uninstall.sh")), SHORT);
-        assertNotNull("the dialog shows the command it will run", message);
-        String text = message.getText();
-        assertTrue("it says the package and the repository go",
-                text.contains("opencode package") && text.contains("APT repository"));
-        assertTrue("it says credentials and sessions are kept",
-                text.contains("kept") && text.contains("~/.config/opencode"));
-        shot("03-uninstall-consent.png");
+        UiObject2 keep = device.findObject(By.text("Keep my settings"));
+        UiObject2 purge = device.findObject(By.text("Remove everything"));
+        assertNotNull("keeping settings is offered", keep);
+        assertNotNull("deleting everything is offered", purge);
+        assertTrue("keeping settings is the default", keep.isChecked());
+        assertFalse("deleting everything is not the default", purge.isChecked());
 
-        UiObject2 cancel = device.wait(
-                Until.findObject(By.text(Pattern.compile("(?i)^cancel$"))), SHORT);
-        assertNotNull("the dialog offers a cancel button", cancel);
-        cancel.click();
-        assertTrue("cancel closes the dialog and removes nothing",
-                device.wait(Until.gone(By.text("Remove opencode?")), SHORT));
-        assertTrue("no Termux window was opened by cancelling",
-                !device.hasObject(By.pkg(TERMUX)));
+        UiObject2 preview = device.wait(Until.findObject(By.textContains("uninstall.sh")), SHORT);
+        assertNotNull("the page shows the command it would run", preview);
+        assertFalse("the default command keeps the data",
+                preview.getText().contains("--purge"));
+        UiObject2 keepDetail = device.findObject(By.textContains("~/.config/opencode"));
+        assertNotNull("the page names the directories the default keeps", keepDetail);
+        shot("03-uninstall-page.png");
+
+        purge.click();
+        assertTrue("deleting everything changes the command",
+                device.wait(Until.hasObject(By.textContains("--purge")), SHORT));
+        UiObject2 purgeDetail = device.findObject(By.textContains("connected again"));
+        assertNotNull("the destructive choice says what it destroys", purgeDetail);
+        shot("04-purge-option.png");
+
+        keep.click();
+        assertTrue("going back to the safe choice removes --purge",
+                device.wait(Until.gone(By.textContains("--purge")), SHORT));
+
+        device.pressBack();
+        assertTrue("back returns to the main screen",
+                device.wait(Until.hasObject(By.text("Install opencode")), SHORT));
+        assertTrue("reading the page sends nothing", !device.hasObject(By.pkg(TERMUX)));
     }
 
     /**
      * Removes opencode for real and proves it is gone by asking Termux.
      *
-     * <p>Nothing here is faked: the button sends {@code uninstall.sh}, Termux
-     * runs it in its own window, and the assertion is that a later
-     * {@code opencode --version} in Termux no longer finds a binary.
+     * <p>The page's default is used, so this is also the promise that a normal
+     * uninstall keeps credentials: the command carries no {@code --purge}.
      */
     @Test
     public void dUninstallRemovesOpenCodeForReal() throws Exception {
         device.findObject(By.text("Uninstall opencode")).click();
-        assertTrue("the uninstall dialog appears",
+        assertTrue("the uninstall page opens",
                 device.wait(Until.hasObject(By.text("Remove opencode?")), SHORT));
 
-        UiObject2 remove = device.wait(
-                Until.findObject(By.text(Pattern.compile("(?i)^remove$"))), SHORT);
-        assertNotNull("the dialog offers the destructive action", remove);
+        UiObject2 remove = device.wait(Until.findObject(By.text("Remove opencode")), SHORT);
+        assertNotNull("the page offers the action", remove);
         remove.click();
 
         assertTrue("the removal is handed to the Termux window",
                 device.wait(Until.hasObject(By.pkg(TERMUX)), LONG));
-        shot("04-uninstall-running.png");
+        shot("05-uninstall-running.png");
 
         String report = checkUntil(CHECK_REMOVED, UNINSTALL_BUDGET);
-        assertTrue("the check that reported the removal ran in the app",
+        assertTrue("the check that reported the removal ran in the app: " + report,
                 device.hasObject(By.pkg(PACKAGE)));
-        shot("05-uninstalled.png");
-        assertTrue("the removal was reported before the install ran: " + report,
-                report.startsWith("opencode is not installed"));
+        shot("06-uninstalled.png");
     }
 
     /**
      * Installs opencode for real, after the previous test removed it.
      *
-     * <p>This is the whole point of the app: one tap, a genuine 70 MB install in
+     * <p>This is the whole point of the app: one tap, a genuine install in
      * Termux, and a version string coming back through RUN_COMMAND. It fails if
      * the install did not finish or did not produce a working binary.
      */
@@ -196,12 +211,12 @@ public final class SetupFlowTest {
 
         assertTrue("the setup is handed to the Termux window",
                 device.wait(Until.hasObject(By.pkg(TERMUX)), LONG));
-        shot("06-install-running.png");
+        shot("07-install-running.png");
 
         String report = checkUntil(CHECK_INSTALLED, INSTALL_BUDGET);
         assertTrue("the check that reported the version ran in the app: " + report,
                 device.hasObject(By.pkg(PACKAGE)));
-        shot("07-installed.png");
+        shot("08-installed.png");
     }
 
     // --- helpers -------------------------------------------------------------
@@ -239,8 +254,8 @@ public final class SetupFlowTest {
     }
 
     /**
-     * Asks Termux repeatedly until it reports {@code needle}. The asking is
-     * needed rather than one long wait because a check answers immediately -
+     * Asks Termux repeatedly until it reports exactly {@code wanted}. The asking
+     * is needed rather than one long wait because a check answers immediately -
      * with the old version while the install is still downloading - so the only
      * honest signal is a check that has already started after the work finished.
      */
