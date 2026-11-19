@@ -100,7 +100,7 @@ public final class PtySizeTest {
             if (pattern.matcher(seen).find()) {
                 return seen;
             }
-            Thread.sleep(200);
+            Thread.sleep(50);
         }
         throw new AssertionError("no line matching " + pattern + " appeared in events.log");
     }

@@ -66,7 +66,7 @@ public final class SetupFlowTest {
     /** The first chunk of a command that is still running. */
     private static final long STREAM = 8_000;
     /** Between two checks while waiting for a long command to finish. */
-    private static final long RETRY = 3_000;
+    private static final long RETRY = 1_000;
     /**
      * How long a running command may produce nothing at all.
      *
@@ -397,7 +397,7 @@ public final class SetupFlowTest {
             if (stream.find()) {
                 return "streamed " + stream.group(1) + " bytes while running";
             }
-            Thread.sleep(250);
+            Thread.sleep(100);
         }
         return null;
     }
@@ -524,7 +524,7 @@ public final class SetupFlowTest {
                     bytes += Long.parseLong(counted.group(1));
                 }
             }
-            Thread.sleep(500);
+            Thread.sleep(250);
         }
         fail("the command streamed " + bytes + " bytes and then produced nothing for "
                 + (stall / 1000) + "s. " + diagnosis());
@@ -543,7 +543,7 @@ public final class SetupFlowTest {
             if (text != null && acceptable.test(text)) {
                 return text;
             }
-            Thread.sleep(250);
+            Thread.sleep(100);
         }
         return null;
     }

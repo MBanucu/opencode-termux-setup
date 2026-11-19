@@ -193,7 +193,7 @@ public final class PtyRenderingTest {
             if (wanted.test(shown)) {
                 return shown;
             }
-            Thread.sleep(200);
+            Thread.sleep(50);
         }
         throw new AssertionError("the screen never showed what was expected; last screen: "
                 + shown.replace("\n", " | "));

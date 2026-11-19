@@ -41,6 +41,8 @@ public final class TerminalHeightTest {
     private static final float[] FRACTIONS = {0.2f, 0.45f, 0.62f};
 
     private static final long SHORT = 5_000;
+    /** How long the log has to stay unchanged for the page to count as settled. */
+    private static final long QUIET = 400;
 
     @Rule
     public final TestTimings timings = new TestTimings();
@@ -115,10 +117,25 @@ public final class TerminalHeightTest {
      * a chunk lands publishes another line; the one that matters is the last.
      */
     private String settledTail() throws Exception {
-        Thread.sleep(2_000);
+        // Silence is the signal: the page republishes whenever its screen or its
+        // size changes, so the measurements have stopped coming when the log has
+        // gone this long without a new line. A fixed sleep was either wasted time
+        // or a halfway drawn buffer read on a slow device.
+        String log = "";
+        long quietSince = System.currentTimeMillis();
+        long deadline = quietSince + SHORT;
+        while (System.currentTimeMillis() < deadline) {
+            String latest = device.executeShellCommand("logcat -d -s OpencodeSetup:I");
+            if (!latest.equals(log)) {
+                log = latest;
+                quietSince = System.currentTimeMillis();
+            } else if (System.currentTimeMillis() - quietSince >= QUIET) {
+                break;
+            }
+            Thread.sleep(50);
+        }
         String tail = null;
-        Matcher found = Pattern.compile("tail:\\{[^}]*\\}").matcher(
-                device.executeShellCommand("logcat -d -s OpencodeSetup:I"));
+        Matcher found = Pattern.compile("tail:\\{[^}]*\\}").matcher(log);
         Pattern chars = Pattern.compile("\"chars\":(\\d+)");
         while (found.find()) {
             Matcher count = chars.matcher(found.group());

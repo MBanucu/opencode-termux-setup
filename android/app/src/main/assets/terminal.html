@@ -183,10 +183,11 @@
     window.AndroidBridge.onTail(JSON.stringify(tailInfo()));
   }
 
-  // Published once a second, not per chunk: every update is an accessibility
-  // event, and a terminal that fires four a second keeps UI Automator from
-  // getting a stable snapshot of the page.
-  setInterval(publish, 1000);
+  // Four times a second, not per chunk: every update is an accessibility event,
+  // and a terminal that fires per chunk keeps UI Automator from getting a stable
+  // snapshot of the page. Once a second, though, meant every wait paid up to a
+  // second for a screen that had already been drawn.
+  setInterval(publish, 250);
 
   // ...and once as soon as the page is laid out: the command waits for this size
   // before it is handed to Termux, so every second before it is a second the
