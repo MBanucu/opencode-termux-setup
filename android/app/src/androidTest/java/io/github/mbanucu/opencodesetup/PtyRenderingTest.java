@@ -174,16 +174,19 @@ public final class PtyRenderingTest {
 
     /** Starts the terminal page with these bytes and nothing else to run. */
     private void render(String ptyBytes) {
-        // The page writes this file as it draws, and a screen that stays empty
-        // is not a change worth publishing: a file left behind by an earlier
-        // phase would otherwise be read as this page's screen. The app is no
-        // longer reinstalled between runs, so the file can survive one.
+        // A file per case: every page publishes to live-output.txt by default,
+        // and a page that is still drawing can leave the previous phase's screen
+        // where this case reads. Naming the file after the case means nothing
+        // else can write there, and the delete removes only an older run's copy.
+        String name = "pty-" + testName.getMethodName() + ".txt";
+        screen = new File(context.getExternalFilesDir(null), name);
         screen.delete();
         TestMilestones.mark("pty-" + testName.getMethodName());
         Intent probe = new Intent(context, TerminalActivity.class)
                 .putExtra(EXTRA_PROBE,
                         Base64.encodeToString(ptyBytes.getBytes(StandardCharsets.UTF_8),
                                 Base64.NO_WRAP))
+                .putExtra("screen_file", name)
                 .putExtra("terminal_title", "PTY probe")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         context.startActivity(probe);

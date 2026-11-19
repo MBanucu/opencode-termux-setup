@@ -753,6 +753,22 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         });
     }
 
+    /**
+     * The file this page publishes its screen to.
+     *
+     * <p>{@code live-output.txt} by default, so adb readers keep working; a
+     * caller can name its own with a {@code screen_file} extra, which is how a
+     * test stops reading another page's screen by accident.
+     */
+    private File screenFile() {
+        File dir = getExternalFilesDir(null);
+        if (dir == null) {
+            return null;
+        }
+        String name = getIntent().getStringExtra("screen_file");
+        return new File(dir, name == null || name.isEmpty() ? "live-output.txt" : name);
+    }
+
     private void startOutput() {
         outputBox();
         running(true);
@@ -762,9 +778,9 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         String waiting = getString(R.string.output_waiting);
         script("waitingB64('" + Base64.encodeToString(
                 waiting.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP) + "')");
-        File dir = getExternalFilesDir(null);
-        if (dir != null) {
-            try (FileOutputStream out = new FileOutputStream(new File(dir, "live-output.txt"))) {
+        File file = screenFile();
+        if (file != null) {
+            try (FileOutputStream out = new FileOutputStream(file)) {
                 out.write(waiting.getBytes(StandardCharsets.UTF_8));
             } catch (IOException unwritable) {
                 Log.w(TAG, "could not reset the live output file", unwritable);
@@ -822,9 +838,8 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             if (!hasWindowFocus()) {
                 return;
             }
-            File dir = getExternalFilesDir(null);
-            if (dir != null) {
-                File file = new File(dir, "live-output.txt");
+            File file = screenFile();
+            if (file != null) {
                 try (FileOutputStream out = new FileOutputStream(file)) {
                     out.write(text.getBytes(StandardCharsets.UTF_8));
                 } catch (IOException unwritable) {
