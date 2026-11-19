@@ -113,7 +113,10 @@ run_phase() {
     local class=$1 log=$2 label=${3:-$1} started
     start_estimates "$class"
     started=$(date +%s)
-    adb shell am instrument -w -e class "$class" -e runId "$run_id" "$runner" \
+    # Window animations are pure wall clock for a test that taps and waits:
+    # the flag covers the activities this run starts, and nothing else.
+    adb shell am instrument -w --no-window-animation \
+        -e class "$class" -e runId "$run_id" "$runner" \
         | tee "$log" || true
     stop_estimates
     # What the phase cost, so the quiet stretches in the recording have a number
