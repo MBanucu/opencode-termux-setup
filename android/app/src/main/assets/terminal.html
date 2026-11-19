@@ -30,6 +30,9 @@
     fontFamily: 'monospace',
     fontSize: 12,
     cursorBlink: true,
+    // The bundle Termux returns uses "\n" where the PTY used "\r\n"; a real
+    // terminal keeps the column on a line feed, which indented "exit code 0".
+    convertEol: true,
     // Display only: nothing is typed here, the command runs in Termux.
     disableStdin: true,
     scrollback: 3000
@@ -78,7 +81,10 @@
       lines.push(line ? line.translateToString(true) : '');
     }
     while (lines.length && lines[lines.length - 1] === '') lines.pop();
-    return lines.join('\n');
+    // An accessibility node does not carry an install's whole scrollback well:
+    // the last lines are what a reader and the end-to-end test need, and a
+    // check result is two of them.
+    return lines.slice(-60).join('\n');
   }
 
   var last = '';
