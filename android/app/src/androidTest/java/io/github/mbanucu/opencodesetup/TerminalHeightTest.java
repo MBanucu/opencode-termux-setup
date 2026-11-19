@@ -91,8 +91,16 @@ public final class TerminalHeightTest {
      * top, and that instance reads the extra in {@code onCreate}.
      */
     private void openAt(float fraction) throws Exception {
-        device.executeShellCommand("am start -W -n " + PACKAGE + "/.MainActivity"
-                + " --ef terminal_fraction " + fraction);
+        // CLEAR_TASK (0x8000) with NEW_TASK (0x10000000): a fresh page instance
+        // without stopping the process the test runner lives in, which is what a
+        // plain start does not guarantee - it reused the page and every height
+        // came back the same. The filler makes the buffer overflow, because only
+        // a full terminal puts the last line at the bottom edge.
+        device.executeShellCommand("am start -W -f 0x10008000 -n " + PACKAGE + "/.MainActivity"
+                + " --ef terminal_fraction " + fraction
+                + " --ei filler_lines 300");
+        device.wait(Until.hasObject(By.text("Install opencode")), SHORT);
+        Thread.sleep(500);
     }
 
     /** The geometry line the page logs once its text changes. */

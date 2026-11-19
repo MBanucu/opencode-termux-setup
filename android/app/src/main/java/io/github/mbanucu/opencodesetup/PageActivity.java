@@ -78,6 +78,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private ProgressBar busy;
     private Button copyButton;
     private boolean outputLoaded;
+    private boolean fillerDone;
     private final Deque<String> waitingScripts = new ArrayDeque<>();
     private final List<Button> actionButtons = new ArrayList<>();
     private final List<View> collapseOnRun = new ArrayList<>();
@@ -120,6 +121,30 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     protected void onResume() {
         super.onResume();
         RunCommandReceiver.setListener(this);
+        fillForTest();
+    }
+
+    /**
+     * Fills the terminal with lines when an intent asks for it.
+     *
+     * <p>A clipping bug at the bottom edge only shows on a terminal that is full,
+     * and the app's own commands are either two lines or a two-minute install.
+     * {@code --ei filler_lines 200} makes the page write that many lines once, so
+     * the end-to-end test can measure a full terminal at any height.
+     */
+    private void fillForTest() {
+        int lines = getIntent() == null ? 0 : getIntent().getIntExtra("filler_lines", 0);
+        if (lines <= 0 || fillerDone) {
+            return;
+        }
+        fillerDone = true;
+        outputBox();
+        StringBuilder text = new StringBuilder();
+        for (int line = 1; line <= lines; line++) {
+            text.append("line ").append(line).append(" of ").append(lines).append('\n');
+        }
+        write(text.toString());
+        reveal();
     }
 
     @Override
