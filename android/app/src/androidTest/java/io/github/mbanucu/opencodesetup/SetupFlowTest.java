@@ -218,7 +218,10 @@ public final class SetupFlowTest {
         // cleanup, not a removal, and its streamed output would be over before
         // the page could show it. A previous run can leave it gone, so the state
         // is restored first.
-        String present = checkOnce();
+        String present;
+        try (TestMilestones.Step ignored = TestMilestones.step("ask whether it is there")) {
+            present = checkOnce();
+        }
         if (present == null || !CHECK_INSTALLED.matcher(present.trim()).matches()) {
             installThroughThePage();
         }
@@ -568,9 +571,7 @@ public final class SetupFlowTest {
         long deadline = System.currentTimeMillis() + budget;
         String report = null;
         while (System.currentTimeMillis() < deadline) {
-            try (TestMilestones.Step ignored = TestMilestones.step("check round trip")) {
-                report = checkOnce();
-            }
+            report = checkOnce();
             if (report != null && wanted.matcher(report.trim()).matches()) {
                 return report;
             }

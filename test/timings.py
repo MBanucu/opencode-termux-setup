@@ -202,9 +202,13 @@ def report_steps(args):
         steps = list(db.execute(
             "SELECT step, millis FROM steps WHERE run = ? AND class = ? AND test = ?"
             " ORDER BY id", (run, room, test)))
+        if not steps:
+            print("  %-50s %6s" % (test, seconds(millis)))
+            continue
         covered = sum(step[1] for step in steps)
-        print("  %-50s %6s  (%s in %d step(s))"
-              % (test, seconds(millis), seconds(covered), len(steps)))
+        print("  %-50s %6s  (%s in %d step(s), %s outside them)"
+              % (test, seconds(millis), seconds(covered), len(steps),
+                 seconds(max(0, millis - covered))))
         for name, took in steps:
             print("      %-46s %6s" % (name, seconds(took)))
     return 0
