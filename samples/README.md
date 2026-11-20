@@ -356,18 +356,17 @@ performs the actions, and the assertions are the rows and events it is given. No
 coordinate taps, no `input text`.
 
 ```bash
-bash samples/build.sh native-terminal && bash samples/build.sh a11y-probe
-bash samples/e2e.sh                 # the fast checks
-bash samples/e2e.sh --opencode      # and the TUI
+bash test/local-build.sh --samples  # build both APKs, then the fast checks
+bash samples/e2e.sh --opencode      # and the TUI, against installed APKs
 bash samples/e2e.sh --only tui-echo # one check
 ```
 
 It installs both APKs, grants the Termux permission, enables the probe, and puts
-the display size and accessibility settings back as it found them on exit,
-including when a check fails or the run is interrupted. The values are saved in
-`samples/out/device-state.txt` before anything changes, so a run that is killed,
-or loses adb while the display is resized, is repaired by the next run; to do it
-without running the checks:
+the accessibility settings back as it found them on exit, including when a check
+fails or the run is interrupted. The display is never resized - the window checks
+shrink the app's own view - so there is no display state to restore. The saved
+accessibility values live in `samples/out/device-state.txt`, so a run that is
+killed is repaired by the next run; to do it without running the checks:
 
 ```bash
 bash samples/e2e.sh --restore

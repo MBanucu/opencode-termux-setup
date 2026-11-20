@@ -4,8 +4,8 @@
 # tree it dumps), and the assertions are the events and rows it is given. Nothing
 # here taps a coordinate or types with `input text`.
 #
-#   bash samples/build.sh native-terminal && bash samples/build.sh a11y-probe
-#   bash samples/e2e.sh                   # the fast checks
+#   bash test/local-build.sh --samples    # builds both APKs, then runs this suite
+#   bash samples/e2e.sh                   # the fast checks (APKs already installed)
 #   bash samples/e2e.sh --opencode        # also the TUI (slow, needs opencode)
 #   bash samples/e2e.sh --only tui-echo   # just one check
 #   bash samples/e2e.sh --only pty,tui-bg # several checks, one install

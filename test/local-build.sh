@@ -5,9 +5,11 @@
 # change without pushing to GitHub, where .github/workflows/android.yml is the
 # compiler of record.
 #
-#   bash test/local-build.sh                 # build both APKs, then run the suite
+#   bash test/local-build.sh                 # build, then the app and sample suites
 #   bash test/local-build.sh --offline       # same, without Gradle hitting the network
 #   bash test/local-build.sh --skip-tests    # build only, print the APK paths
+#   bash test/local-build.sh --skip-samples  # the app and its suite, not the samples
+#   bash test/local-build.sh --samples       # only the sample apps' checks
 #   bash test/local-build.sh --only <class>[#method]   # one test instead of the suite
 #
 # Needs: JDK 17+, an Android SDK (ANDROID_HOME, ANDROID_SDK_ROOT, ~/android-sdk
@@ -29,24 +31,40 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 android=$root/android
 offline=false
+build=true
 run_tests=true
+run_samples=true
+samples_only=false
 only=""
 
 while [ $# -gt 0 ]; do
     case $1 in
-        --offline)    offline=true; shift ;;
-        --skip-tests) run_tests=false; shift ;;
+        --offline)      offline=true; shift ;;
+        --skip-tests)   run_tests=false; run_samples=false; shift ;;
+        --skip-samples) run_samples=false; shift ;;
+        --samples)
+            samples_only=true
+            build=false
+            run_tests=false
+            shift ;;
         --only)
             [ -n "${2:-}" ] || { echo "--only needs a class or class#method" >&2; exit 2; }
             only=$2
             shift 2 ;;
         --help|-h)
-            echo "usage: bash test/local-build.sh [--offline] [--skip-tests]"
+            echo "usage: bash test/local-build.sh [--offline] [--skip-tests] [--skip-samples]"
+            echo "       bash test/local-build.sh --samples [--only <check>]"
             echo "       bash test/local-build.sh --only <class>[#method]"
             exit 0 ;;
         *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
 done
+
+# `--only` names one instrumented test; that is not the samples suite, which
+# would otherwise run its whole set around a request for a single test.
+if [ -n "$only" ] && ! $samples_only; then
+    run_samples=false
+fi
 
 # --- SDK -----------------------------------------------------------------------
 sdk=""
@@ -84,24 +102,29 @@ fi
 
 cd "$android"
 
-# --- build ---------------------------------------------------------------------
-# One Gradle invocation for both APKs: the test APK shares everything the app
-# APK already produced.  Both must be built here rather than mixed with a CI
-# artifact, because CI signs each run with its own debug keystore and adb then
-# refuses the instrumentation with a Permission Denial.
-echo "== build =="
-start=$SECONDS
-./gradlew ${args[@]+"${args[@]}"} assembleDebug assembleDebugAndroidTest
-built=$((SECONDS - start))
-
 apk=$android/app/build/outputs/apk/debug/app-debug.apk
 test_apk=$android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-for f in "$apk" "$test_apk"; do
-    [ -f "$f" ] || { echo "gradle reported success but $f is missing" >&2; exit 1; }
-done
-echo "   built in ${built}s"
-echo "   app:  $(wc -c < "$apk") bytes"
-echo "   test: $(wc -c < "$test_apk") bytes"
+start=$SECONDS
+built=0
+
+# --- build ---------------------------------------------------------------------
+if $build; then
+    # One Gradle invocation for both APKs: the test APK shares everything the app
+    # APK already produced.  Both must be built here rather than mixed with a CI
+    # artifact, because CI signs each run with its own debug keystore and adb then
+    # refuses the instrumentation with a Permission Denial.
+    echo "== build =="
+    build_start=$SECONDS
+    ./gradlew ${args[@]+"${args[@]}"} assembleDebug assembleDebugAndroidTest
+    built=$((SECONDS - build_start))
+
+    for f in "$apk" "$test_apk"; do
+        [ -f "$f" ] || { echo "gradle reported success but $f is missing" >&2; exit 1; }
+    done
+    echo "   built in ${built}s"
+    echo "   app:  $(wc -c < "$apk") bytes"
+    echo "   test: $(wc -c < "$test_apk") bytes"
+fi
 
 # --- end-to-end suite ----------------------------------------------------------
 if $run_tests; then
@@ -116,10 +139,28 @@ if $run_tests; then
         exit 1
     fi
     echo "   suite in $((SECONDS - suite_start))s"
-else
+elif $build; then
     echo
     echo "tests skipped; run them with:"
     echo "  bash test/android-e2e.sh \"$apk\" \"$test_apk\""
+fi
+
+# --- sample apps ---------------------------------------------------------------
+# The samples are not Gradle modules and have their own build and checks; running
+# them from here is what keeps one command - and one SDK lookup - for the whole
+# repository. The checks install the APKs and drive the probe themselves.
+if $run_samples; then
+    cd "$root"
+    echo
+    echo "== sample apps =="
+    samples_start=$SECONDS
+    bash "$root/terminal/test.sh"
+    bash "$root/samples/build.sh" all
+    if ! bash "$root/samples/e2e.sh" ${only:+--only "$only"}; then
+        echo "samples FAILED after $((SECONDS - samples_start))s" >&2
+        exit 1
+    fi
+    echo "   samples in $((SECONDS - samples_start))s"
 fi
 
 echo

@@ -2,6 +2,7 @@
 # Builds one sample app into samples/out/<app>.apk without Gradle.
 #
 #   bash samples/build.sh native-terminal
+#   bash test/local-build.sh --samples   # builds them all, then runs their checks
 #
 # The point of these samples is to be readable and runnable on the device this
 # repository was written on, where Gradle's aapt2 has no aarch64 build. The steps
@@ -20,7 +21,21 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/.." && pwd)
-sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}
+# The same candidates test/local-build.sh looks at, so a machine that can build
+# the app can build a sample and neither script has its own idea of where the SDK
+# lives. The main script exports ANDROID_HOME before calling this one.
+sdk=""
+for candidate in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/android-sdk" /usr/lib/android-sdk; do
+    if [ -n "$candidate" ] && [ -d "$candidate/platforms" ]; then
+        sdk=$candidate
+        break
+    fi
+done
+if [ -z "$sdk" ]; then
+    echo "no Android SDK found (looked at ANDROID_HOME, ANDROID_SDK_ROOT," >&2
+    echo "$HOME/android-sdk and /usr/lib/android-sdk)." >&2
+    exit 1
+fi
 api=35
 android_jar=$sdk/platforms/android-$api/android.jar
 build_tools=$sdk/build-tools/35.0.0
@@ -38,12 +53,9 @@ case "$app" in
         ;;
     test|--test)
         shift
-        bash "$here/build.sh" native-terminal
-        bash "$here/build.sh" a11y-probe
-        echo "== terminal: JVM suite"
-        bash "$root/terminal/test.sh"
-        echo "== samples: device e2e"
-        exec bash "$here/e2e.sh" "$@"
+        # One entry for every suite. A second copy of the build order here is how
+        # this script and the repository's build loop drifted apart.
+        exec bash "$root/test/local-build.sh" --samples "$@"
         ;;
 esac
 app=${1:?usage: build.sh <app directory>}
