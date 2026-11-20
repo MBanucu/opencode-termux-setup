@@ -611,6 +611,7 @@ public final class TerminalView extends View {
     @Override
     protected void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocused) {
         super.onFocusChanged(gainFocus, direction, previouslyFocused);
+        reportFocus(gainFocus);
         if (!gainFocus) {
             return;
         }
@@ -618,6 +619,17 @@ public final class TerminalView extends View {
         if (imm != null) {
             imm.restartInput(this);
         }
+    }
+
+    /**
+     * Tells a program that asked for focus events (DEC modes 1004/2031) when
+     * the view comes and goes, as xterm does with CSI I and CSI O.
+     */
+    private void reportFocus(boolean hasFocus) {
+        if (rawInput == null || !screen.focusReporting()) {
+            return;
+        }
+        rawInput.onInput(hasFocus ? "\u001b[I" : "\u001b[O");
     }
 
     /**

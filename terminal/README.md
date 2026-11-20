@@ -53,6 +53,11 @@ F1-F12, with DECCKM switching arrows and Home/End to the `ESC O` forms.
 Ctrl, Alt and Shift modify a typed character or a cursor key: a modified arrow,
 Home or End is `ESC [ 1 ; m` plus its final byte, where `m` is 1 plus Shift,
 2 for Alt and 4 for Ctrl, so Alt+Left sends `ESC[1;3D`.
+Bracketed-paste mode (2004) is tracked too, so a paste can be wrapped when the
+program asks for it.
+Focus reporting (1004/2031) is tracked, and the view sends `ESC[I`/`ESC[O` when
+the program asks; mouse modes 1000/1002/1003 with 1006/1015 encodings are
+tracked, though touch still scrolls.
 
 Queries are answered through a `ReplySink`: DA1/DA2, DSR and CPR, XTVERSION,
 the kitty keyboard query and OSC 10/11 colours. Point it at the pty's

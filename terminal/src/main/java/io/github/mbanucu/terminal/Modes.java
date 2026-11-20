@@ -18,6 +18,14 @@ final class Modes {
     private boolean cursorBlink;
     /** DECCKM: arrows and Home/End use SS3 (ESC O) instead of CSI. */
     private boolean applicationCursor;
+    /** Mode 2004: the program wants a paste wrapped in ESC [ 200 ~ / 201 ~. */
+    private boolean bracketedPaste;
+    /** 1000/1002/1003: press/release, button-motion or any-motion reports. */
+    private int mouseMode;
+    /** 1006 (SGR) or 1015 (urxvt): how a mouse report names its coordinates. */
+    private int mouseEncoding;
+    /** 1004/2031: report focus in and out. */
+    private boolean focusReporting;
     /** Between ?2026h and ?2026l, mode changes wait for the frame to end. */
     private boolean syncUpdate;
     private boolean pendingCursorVisible;
@@ -33,6 +41,22 @@ final class Modes {
 
     boolean applicationCursors() {
         return applicationCursor;
+    }
+
+    boolean bracketedPaste() {
+        return bracketedPaste;
+    }
+
+    int mouseMode() {
+        return mouseMode;
+    }
+
+    int mouseEncoding() {
+        return mouseEncoding;
+    }
+
+    boolean focusReporting() {
+        return focusReporting;
     }
 
     /** DECSCUSR: 1/3/5 blink, 2/4/6 are steady, 0 goes back to the default. */
@@ -75,6 +99,31 @@ final class Modes {
         }
         if (mode == 12) {
             cursorBlink = set;
+            return true;
+        }
+        if (mode == 2004) {
+            bracketedPaste = set;
+            return true;
+        }
+        if (mode == 1000 || mode == 1002 || mode == 1003) {
+            // The three tracking modes replace each other; each turns itself off.
+            if (set) {
+                mouseMode = mode;
+            } else if (mouseMode == mode) {
+                mouseMode = 0;
+            }
+            return true;
+        }
+        if (mode == 1006 || mode == 1015) {
+            if (set) {
+                mouseEncoding = mode;
+            } else if (mouseEncoding == mode) {
+                mouseEncoding = 0;
+            }
+            return true;
+        }
+        if (mode == 1004 || mode == 2031) {
+            focusReporting = set;
             return true;
         }
         return false;

@@ -298,6 +298,26 @@ final class Screen implements EscapeParser.Handler {
         return modes.applicationCursors();
     }
 
+    /** True between ?2004h and ?2004l, when a paste should be bracketed. */
+    boolean bracketedPaste() {
+        return modes.bracketedPaste();
+    }
+
+    /** The mouse-reporting mode in force (1000, 1002, 1003), or 0. */
+    int mouseMode() {
+        return modes.mouseMode();
+    }
+
+    /** The mouse coordinate encoding in force (1006 or 1015), or 0. */
+    int mouseEncoding() {
+        return modes.mouseEncoding();
+    }
+
+    /** True while the program asked for focus in/out reports (1004/2031). */
+    boolean focusReporting() {
+        return modes.focusReporting();
+    }
+
     // --- input -----------------------------------------------------------------
 
     void feed(String chunk) {

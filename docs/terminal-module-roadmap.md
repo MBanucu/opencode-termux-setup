@@ -1,6 +1,20 @@
 # Roadmap: replace xterm.js with the terminal module
 
-Status: draft, 2026-11-20.
+Status: draft, 2026-11-20. Last reviewed after the SGR-attribute,
+modifier-key, query-reply and bracketed-paste slices.
+
+## Where this stands
+
+Phase 1 is most of the way there: the module parses the escapes a TUI uses,
+keeps a 3000-row primary-screen scrollback with colours and attributes, has a
+cell-range selection model that joins wrapped rows, answers the common device
+queries, and encodes hardware keys including modified cursor keys. Thirteen JVM
+suites (298 checks) pass without a device, and `samples/native-terminal` builds.
+
+What remains is concentrated in four places: the selection/copy UI (1.2),
+mouse encoding and paste wrapping (1.5), wide and combining characters (1.6),
+and any measurement at all (1.8). The app is still on the xterm page;
+`PageActivity` has only been read, not changed.
 
 The app's terminal page currently uses a WebView and xterm.js. The
 [`terminal/`](../terminal/README.md) module can draw the same bytes in a native
@@ -16,9 +30,11 @@ page has today.
 - The native view was measured with a real Termux session: rows as `TextView`
   nodes, `ACTION_SET_TEXT` reaching the shell, output announced, and the grid
   resize reaching the PTY.
-- The module is not an xterm replacement yet. It has no scrollback, selection,
-  copy, mouse or bracketed-paste state, and it only carries part of `SGR`.
-  Replacing the page before those are covered would regress daily use.
+- The module is not an xterm replacement yet. It has the scrollback and
+  selection *models*, SGR colour and attributes, query replies, key encoding
+  and the input-mode state, but no selection/copy UI, no mouse encoding, no
+  wide-character handling and no performance numbers. Replacing the page before
+  those are covered would regress daily use.
 
 ## Guardrails
 
@@ -39,8 +55,13 @@ page has today.
 ## Current state
 
 - [x] `TerminalView` and `Screen`: alternate screen, cursor addressing, erases,
-  insert/delete, scroll regions, `SGR` foreground/background (16, 256 and
-  truecolor), bold brightness, caret blink.
+  insert/delete, scroll regions, `SGR` colour (16, 256 and truecolor), bold,
+  dim, underline, reverse, italic, strikethrough and hidden, caret blink.
+- [x] Key encoding: named hardware keys, DECCKM, the Ctrl/Alt character forms
+  and xterm's modifier parameter for arrows, Home and End.
+- [x] Query replies: DA1/DA2, DSR/CPR, XTVERSION, OSC 10/11 and the kitty
+  query, sent through a `ReplySink`.
+- [x] Bracketed-paste mode (2004) tracked and exposed to the view.
 - [x] Accessibility: one node per non-blank row, an editable prompt node,
   `ACTION_SET_TEXT`, `InputConnection`, coalesced announcements.
 - [x] Resize callback from the view to the app (`setSizeListener`).
@@ -53,6 +74,8 @@ page has today.
 - [x] Primary-screen scrollback model: a 3000-row default, per-cell colours,
   resize, alternate-screen isolation, partial-region exclusion, `ED 3`, and
   `textWithHistory()`; `TerminalView.screenText()` includes it.
+- [x] Cell-range selection model across the grid and history, joining wrapped
+  rows; no long-press UI, handles or clipboard yet.
 - [x] The research note documents the measured WebView/xterm and native-view
   accessibility difference.
 - [ ] The app uses the module. `PageActivity` still loads
@@ -64,16 +87,27 @@ The module is kept in small files with one job each, so a change lands in the
 file named for it:
 
 - [x] `Viewport` — the window over history and the live grid.
-- [x] `HistoryRow` — one stored history row and its colours.
+- [x] `HistoryRow` — one stored history row, its colours and its attributes.
+- [x] `Scrollback` — the bounded list of rows that left the top.
 - [x] `AnsiPalette` — the 16-colour palette, the 256 cube and bold brightening.
+- [x] `CellAttributes` — the per-cell SGR bits.
+- [x] `Sgr` — the colour and attribute state, and the foreground to paint with.
+- [x] `EscapeParser` — chunk buffering, split sequences and OSC/DCS payloads.
+- [x] `Modes` — caret visibility/blink, DECCKM, synchronized update and
+  bracketed paste.
+- [x] `Replies` — the fixed bytes for the queries the screen answers.
 - [x] `Selection` — an inclusive viewport cell range and the text it copies,
   joining wrapped rows.
 - [x] `TerminalAccessibility` — row nodes, the prompt node, events and the
   announcement timer.
-- [x] `Screen.csi` splits into private-mode handling (`applyModes`) and the
-  non-private dispatch (`dispatch`).
-- [x] `KeyEncoder` — named hardware keys and modified characters.
+- [x] `CsiCommands` — the non-private CSI table; `Screen` keeps the state and
+  one operation per command.
+- [x] `KeyEncoder` — named hardware keys, modified cursor keys and characters.
 - [x] `ReplySink` — the caller's write path for query answers.
+
+`Screen` is still the largest file (grid, both buffers, resize and mode
+handling). If it grows again, the next extraction is the two-screen buffer
+state: chars, foreground, background, attributes and wrap flags per row.
 
 ## Phase 0 — decide the shape
 
@@ -102,8 +136,8 @@ agreed.
 
 ## Phase 1 — terminal behavior
 
-Do these in `terminal/src/main/java` (and `ScreenTest`) before touching the app
-beyond the flag.
+Do these in `terminal/src/main/java` (and the JVM suites under
+`terminal/src/test`) before touching the app beyond the flag.
 
 ### 1.1 Scrollback and touch scrolling
 
@@ -156,9 +190,12 @@ UI, clipboard and resize test remain.
   must also be complete for a hardware keyboard.
 - [ ] Tests with a scripted pty that echoes the received byte sequences.
 
-Model state: named keys, DECCKM, the Ctrl/Alt character forms and the
-modifier-encoded cursor keys are covered by `KeyEncoderTest`; the footer key
-path and the scripted-pty test remain.
+Model state: named keys, DECCKM, the Ctrl/Alt character forms, the
+modifier-encoded cursor keys and the remaining control bytes are covered by
+`KeyEncoderTest` and `CharacterTest`. `TerminalView.encodedKey` is the only
+Android-key mapping. The footer is still separate: `PageActivity.type(byte[])`
+and `control(byte[])` spell their own cursor sequences and control codes, so
+the module is not yet what the footer sends through.
 
 ### 1.4 Query replies
 
@@ -169,24 +206,40 @@ path and the scripted-pty test remain.
 - [x] Do not reply when the program did not ask; avoid reply loops.
 - [x] Tests for each reply, including escapes split across feeds.
 
-Model state: the sink and every answer above are covered by `QueryReplyTest`;
-the DCS termcap answer and wiring the app's `LiveStream` write path remain.
+Model state: the sink and every answer above are covered by `QueryReplyTest`,
+and the bytes live in `Replies`. The DCS termcap answer waits on the wrapper's
+terminfo name, and nothing in the app points a sink at `LiveStream` yet.
 
 ### 1.5 Mouse, bracketed paste and focus
 
-- [ ] Parse and honour DEC mouse modes 1000/1002/1003/1006/1015; encode SGR
-  mouse events.
-- [ ] Bracketed paste (mode 2004) around clipboard text.
-- [ ] Focus events (1004/2031) when the view gains/loses focus.
+- [x] Track DEC mouse modes 1000/1002/1003 and coordinate encodings 1006/1015,
+  and expose them to the view.
+- [ ] Encode mouse events and honour the tracking modes on touch; the
+  touch-to-mouse decision below comes first.
+- [x] Track bracketed-paste mode (2004) and expose it to the view.
+- [ ] Wrap clipboard text in `ESC[200~` / `ESC[201~` when the mode is on.
+- [x] Focus events (1004/2031): the view sends `ESC[I` / `ESC[O` through its
+  raw-input path when the program asked for them.
 - [ ] Decide touch-to-mouse behaviour for the TUI; at minimum do not regress
   scrolling and selection.
-- [ ] Tests for each mode and for paste wrapping.
+- [ ] Tests for mouse encoding and for paste wrapping.
+
+Model state: bracketed-paste mode, the mouse-mode/encoding state and focus
+reporting are covered by `InputModeTest`; the alternate screen leaves bracketed
+paste on. Mouse events are not encoded and touch still scrolls, because the
+touch-to-mouse behaviour is an open decision. `PageActivity.paste()` still sends
+clipboard bytes raw, so the wrapping half of 2004 has no caller yet.
 
 ### 1.6 Wide and combining characters
 
 - [ ] Use a width table (`wcwidth`-style) for width-2 cells and combining marks.
 - [ ] Store enough per cell for a wide glyph and its continuation.
 - [ ] Tests for CJK, emoji, combining accents and cursor movement over them.
+
+Model state: a cell is one `char`, so a surrogate pair or a combining mark
+occupies two cells today; `line()` trims spaces and NULs from the right. A width
+table and a continuation marker have to land in `Screen`, `HistoryRow` and
+`TerminalView` together, because history and the viewport copy cells unchanged.
 
 ### 1.7 Remaining `SGR`
 
@@ -201,7 +254,10 @@ Model state: every attribute above is parsed into `CellAttributes` bits, stored
 per cell (and per history cell), and drawn by `TerminalView` — reverse swaps the
 cell's colours, dim mixes the glyph with its background, italic selects an
 italic face, and underline and strikethrough are drawn as lines. `AttributeTest`
-covers each code, its reset, `SGR 0`, history and resize.
+covers each code, its reset, `SGR 0`, history and resize. A hidden cell is still
+in the grid, and so still reaches `screenText()`, copy and the accessibility
+rows; xterm hides only the glyph. That is a visible-behaviour decision left
+open, not an implementation detail.
 
 ### 1.8 Performance
 
@@ -210,12 +266,24 @@ covers each code, its reset, `SGR 0`, history and resize.
 - [ ] Optimise only if the budget fails (row runs, glyph cache, fewer invalidations).
 - [ ] Record the numbers in this roadmap or the module README.
 
+Model state: nothing has been measured. The first task is instrumentation, not
+an optimisation: feed-to-frame time at 80x29 and 80x44 plus a fast 3000-line
+scroll, with the numbers written down here.
+
 Gate: the P0/P1 features pass their tests, and an xterm feature the app actually
 uses is either present or explicitly accepted as dropped.
 
 ## Phase 2 — wire the app
 
 The transport stays. Replace the WebView-specific half of `PageActivity`.
+
+Known starting points from reading the page: `outputBox()` builds the `WebView`
+and loads `terminal.html`; output arrives through `LiveStream` and is pushed
+with `writeB64`/`script`; the footer sends through `PageActivity.type(byte[])`,
+which has its own cursor and control table rather than `KeyEncoder`; `Replies`
+has no sink in the app yet, so a native page must point `setReplySink` at
+`LiveStream.send`. The three responsibilities to keep on the page are the
+footer rows, the progress strip and `live-output.txt`.
 
 - [ ] Add the native page/surface and the `terminal_native` flag; keep the xterm
   page behind the other value.
@@ -298,7 +366,9 @@ retired.
 
 ## Open questions
 
-- How much scrollback, and should the alternate screen ever have any?
+- ~~How much scrollback, and should the alternate screen ever have any?~~
+  Answered by the model: 3000 primary-screen rows (`Screen.DEFAULT_HISTORY_LINES`)
+  and none on the alternate screen.
 - Is cell selection enough, or does the app need word/line/block selection?
 - Is a subset VT parser acceptable indefinitely, or should a full parser be
   adopted once scrollback/selection are in place?
