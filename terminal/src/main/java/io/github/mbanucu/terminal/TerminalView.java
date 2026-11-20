@@ -230,7 +230,9 @@ public final class TerminalView extends View {
 
     /** The screen as text, newest line last: what a service reads out of the tree. */
     public String screenText() {
-        StringBuilder all = new StringBuilder(screen.text());
+        // History first: copy, the live-output snapshot and a reader should keep
+        // what scrolled off the top, not only the rows currently on screen.
+        StringBuilder all = new StringBuilder(screen.textWithHistory());
         if (input.length() > 0) {
             all.append("$ ").append(input).append('\n');
         }

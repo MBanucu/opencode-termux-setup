@@ -1,6 +1,8 @@
 package io.github.mbanucu.terminal;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * A character grid: the part of a terminal that makes a full-screen program
@@ -17,6 +19,9 @@ import java.util.Arrays;
  * buffers, no fonts, no mouse reporting, no replies to device queries.
  */
 final class Screen {
+
+    /** The xterm page's scrollback depth, so the native view starts at parity. */
+    static final int DEFAULT_HISTORY_LINES = 3000;
 
     /** The 16 answers to SGR 30-37 and 90-97, the Tango palette. */
     private static final int[] ANSI = {
@@ -64,10 +69,19 @@ final class Screen {
     private int savedCol;
     private int scrollTop;
     private int scrollBottom;
+    /** Rows scrolled off the top of the primary screen, oldest first. */
+    private final List<HistoryRow> history = new ArrayList<>();
+    /** How many such rows to keep; zero disables scrollback. */
+    private final int historyLimit;
 
     Screen(int cols, int rows) {
+        this(cols, rows, DEFAULT_HISTORY_LINES);
+    }
+
+    Screen(int cols, int rows, int historyLines) {
         this.cols = cols;
         this.rows = rows;
+        this.historyLimit = Math.max(0, historyLines);
         main = blank();
         alt = blank();
         mainFg = blankColours();
@@ -94,6 +108,9 @@ final class Screen {
     void resize(int newCols, int newRows) {
         if (newCols < 2 || newRows < 1 || (newCols == cols && newRows == rows)) {
             return;
+        }
+        for (int i = 0; i < history.size(); i++) {
+            history.set(i, history.get(i).resize(newCols));
         }
         main = copy(main, cols, rows, newCols, newRows);
         alt = copy(alt, cols, rows, newCols, newRows);
@@ -185,6 +202,50 @@ final class Screen {
             all.append(line(row)).append('\n');
         }
         return all.toString();
+    }
+
+    /** The whole screen with the primary screen's history above it. */
+    String textWithHistory() {
+        // The alternate screen replaced the program only: its snapshot is the
+        // TUI, not the shell history the program covered.
+        if (alternate) {
+            return text();
+        }
+        StringBuilder all = new StringBuilder();
+        for (HistoryRow row : history) {
+            all.append(row.text()).append('\n');
+        }
+        all.append(text());
+        return all.toString();
+    }
+
+    /** How many rows have scrolled off the top of the primary screen. */
+    int historyRows() {
+        return history.size();
+    }
+
+    /** One history row, oldest first, without its trailing blanks. */
+    String historyLine(int row) {
+        if (row < 0 || row >= history.size()) {
+            return "";
+        }
+        return history.get(row).text();
+    }
+
+    /** The foreground of one history cell: 0xRRGGBB, or 0 for the default. */
+    int historyForeground(int row, int col) {
+        if (row < 0 || row >= history.size()) {
+            return 0;
+        }
+        return history.get(row).foreground(col);
+    }
+
+    /** The background of one history cell: 0xRRGGBB, or 0 for the default. */
+    int historyBackground(int row, int col) {
+        if (row < 0 || row >= history.size()) {
+            return 0;
+        }
+        return history.get(row).background(col);
     }
 
     /** True while the program is on the alternate screen, i.e. a full-screen app. */
@@ -639,6 +700,12 @@ final class Screen {
 
     private void scrollUp(int count) {
         for (int i = 0; i < count; i++) {
+            // Only a full-screen scroll of the primary buffer is scrollback: a
+            // program scrolling a region owns those rows, and the alternate
+            // screen is a full-screen program's own grid, not a log.
+            if (!alternate && scrollTop == 0 && scrollBottom == rows - 1) {
+                rememberTopRow();
+            }
             for (int row = scrollTop; row < scrollBottom; row++) {
                 System.arraycopy(cells[row + 1], 0, cells[row], 0, cols);
                 System.arraycopy(colours[row + 1], 0, colours[row], 0, cols);
@@ -647,6 +714,18 @@ final class Screen {
             Arrays.fill(cells[scrollBottom], ' ');
             Arrays.fill(colours[scrollBottom], 0);
             Arrays.fill(backgrounds[scrollBottom], currentBg);
+        }
+    }
+
+    /** Copies the top row into history before a full-screen scroll consumes it. */
+    private void rememberTopRow() {
+        if (historyLimit == 0) {
+            return;
+        }
+        history.add(new HistoryRow(cells[scrollTop].clone(), colours[scrollTop].clone(),
+                backgrounds[scrollTop].clone()));
+        while (history.size() > historyLimit) {
+            history.remove(0);
         }
     }
 
@@ -669,7 +748,14 @@ final class Screen {
      * space and an ECH to the end of the line, not as a run of spaces.
      */
     private void eraseScreen(int mode) {
-        if (mode == 2 || mode == 3) {
+        if (mode == 3) {
+            // ED 3 is xterm's "clear scrollback", not "clear screen": the
+            // visible grid stays, which is what a program that clears its
+            // scrollback without redrawing relies on.
+            history.clear();
+            return;
+        }
+        if (mode == 2) {
             for (char[] row : cells) {
                 Arrays.fill(row, ' ');
             }
@@ -773,6 +859,50 @@ final class Screen {
             Arrays.fill(cells[scrollBottom], ' ');
             Arrays.fill(colours[scrollBottom], 0);
             Arrays.fill(backgrounds[scrollBottom], currentBg);
+        }
+    }
+
+    /** One row of primary-screen history, with the colours its cells had. */
+    private static final class HistoryRow {
+        private final char[] chars;
+        private final int[] fg;
+        private final int[] bg;
+
+        HistoryRow(char[] chars, int[] fg, int[] bg) {
+            this.chars = chars;
+            this.fg = fg;
+            this.bg = bg;
+        }
+
+        String text() {
+            int end = chars.length;
+            while (end > 0 && (chars[end - 1] == ' ' || chars[end - 1] == 0)) {
+                end--;
+            }
+            return new String(chars, 0, end);
+        }
+
+        int foreground(int col) {
+            return col >= 0 && col < fg.length ? fg[col] : 0;
+        }
+
+        int background(int col) {
+            return col >= 0 && col < bg.length ? bg[col] : 0;
+        }
+
+        HistoryRow resize(int newCols) {
+            if (newCols == chars.length) {
+                return this;
+            }
+            char[] nextChars = new char[newCols];
+            Arrays.fill(nextChars, ' ');
+            int[] nextFg = new int[newCols];
+            int[] nextBg = new int[newCols];
+            int keep = Math.min(newCols, chars.length);
+            System.arraycopy(chars, 0, nextChars, 0, keep);
+            System.arraycopy(fg, 0, nextFg, 0, keep);
+            System.arraycopy(bg, 0, nextBg, 0, keep);
+            return new HistoryRow(nextChars, nextFg, nextBg);
         }
     }
 

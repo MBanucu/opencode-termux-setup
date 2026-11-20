@@ -31,7 +31,9 @@ terminal.feed(chunkFromThePty);        // often; a partial escape is buffered
 ```
 
 `feed` takes whole chunks and does not care where they split: an escape sequence cut
-in half is held until it is complete. `screenText()` returns what the grid holds.
+in half is held until it is complete. `screenText()` returns the primary screen's
+history above the visible grid; on the alternate screen it returns only that
+screen, because a full-screen program owns the display.
 
 On the alternate screen the caret is the view's to draw as well: a block at the
 grid's cursor, hidden while the program says DEC mode 25 is off, and blinking when
@@ -58,8 +60,10 @@ at all.
 ## Tests
 
 `bash terminal/test.sh` compiles `Screen` with `src/test` and runs it on the JVM:
-cursor addressing, erases, insert/delete, scroll regions, the alternate screen,
-wrapping, SGR foreground and background colour (16, 256 and truecolor, and `1`
+cursor addressing, erases, insert/delete, scroll regions, primary-screen
+scrollback (limits, colours, resize, alternate-screen isolation and `ED 3`),
+the alternate screen, wrapping, SGR foreground and background colour (16, 256
+and truecolor, and `1`
 brightening a foreground), the
 caret (DEC mode 25, synchronized updates, DECSCUSR style and DEC mode 12 blinking),
 and the sequences that must print nothing (OSC titles and DCS payloads, cursor
@@ -72,7 +76,8 @@ device and is covered by `samples/e2e.sh`.
 
 - **Not a VT emulator.** `SGR` foreground and background colour are drawn — 16,
   256 and truecolor, with `1` brightening a palette foreground — but underline,
-  reverse and the rest are dropped. No scrollback, selection, copy, mouse or
+  reverse and the rest are dropped. It keeps a primary-screen scrollback (the
+  alternate screen is the program's own), but has no selection, copy, mouse or
   bracketed-paste state. Enough to draw a TUI and read it; not enough to be
   someone's daily terminal without more work.
 - **Not a transport.** An app-owned `forkpty` pty and Termux's `RUN_COMMAND` session
@@ -80,6 +85,12 @@ device and is covered by `samples/e2e.sh`.
   whole contract between the view and the program.
 - **Not verified against TalkBack**, only against an `AccessibilityService` probe, on
   one device (Android 15, API 35).
+
+## Roadmap
+
+The staged plan for replacing the app's xterm.js page with this view — including
+the scrollback, selection, keymap and query-reply work still needed — is in
+[`docs/terminal-module-roadmap.md`](../docs/terminal-module-roadmap.md).
 
 ## Using it
 
