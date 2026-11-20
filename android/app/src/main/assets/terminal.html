@@ -175,10 +175,12 @@
       lines.push(line ? line.translateToString(true) : '');
     }
     while (lines.length && lines[lines.length - 1] === '') lines.pop();
-    // An accessibility node does not carry an install's whole scrollback well:
-    // the last lines are what a reader and the end-to-end test need, and a
-    // check result is two of them.
-    return lines.slice(-40).join('\n');
+    // The whole visible screen, not an arbitrary slice of the scrollback: an
+    // install's whole history is too much for an accessibility node, but a
+    // full-screen program draws its newest output at the top as often as at the
+    // bottom - opencode's shell result sits on the first rows - and a slice of
+    // the last forty lines then publishes a screen in which nothing changed.
+    return lines.slice(-Math.max(40, term.rows)).join('\n');
   }
 
   /**

@@ -1,14 +1,22 @@
 package io.github.mbanucu.opencodesetup;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import android.content.Context;
 import android.content.Intent;
+import android.view.KeyEvent;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.uiautomator.By;
+import androidx.test.uiautomator.UiDevice;
+import androidx.test.uiautomator.UiObject2;
+import androidx.test.uiautomator.Until;
 
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -17,16 +25,34 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Runs the real opencode TUI in this app's terminal and looks at what it draws.
+ * Runs the real opencode TUI in this app's terminal, through the page a user
+ * reaches, and looks at what it draws.
  *
  * <p>Everything else in the suite uses output a command printed. A TUI is the
  * harder case: it switches to the alternate screen, moves the cursor by escape
  * sequence, and redraws panels in place, so a terminal that mishandles any of
- * that shows a mess of half-drawn boxes. This is a visual check with a mechanical
- * floor under it - the screen must be substantial and must not contain raw escape
- * sequences - plus a screenshot for a person to look at.
+ * that shows a mess of half-drawn boxes. This is a visual check with a
+ * mechanical floor under it - the screen must be substantial and must not
+ * contain raw escape sequences - plus a screenshot for a person to look at.
+ *
+ * <p>The terminal is opened the way a user opens it: "Check setup", then "Open
+ * opencode", both awaited as accessibility nodes. That path is not only
+ * navigation - it is what makes the page fit for a TUI, since "Open opencode"
+ * passes the smaller font and the keyboard wiring, while handing the terminal an
+ * intent of our own drew the agent at a check's font, in about 44 columns, on a
+ * screen no user would ever see. The grid the page reports is asserted for the
+ * same reason: opencode drops the footer it prints its version in below about
+ * sixty columns, so a TUI that drew at the wrong size has to fail here.
+ *
+ * <p>Typing is the other half of that page: its keyboard is wired to the PTY's
+ * stdin, and nothing else in the suite sends a byte to a running program. A line
+ * starting with {@code !} is the TUI's shell mode, so a command typed there runs
+ * in Termux and its output comes back over the same stream.
  *
  * <p>The frame to look at is not taken here: the run is recorded, this marks the
  * moment, and {@code test/frames.py extract --names opencode-tui} produces the
@@ -38,25 +64,87 @@ import java.nio.charset.StandardCharsets;
 @RunWith(AndroidJUnit4.class)
 public final class OpencodeTuiTest {
 
+    private static final String PACKAGE = "io.github.mbanucu.opencodesetup";
+    private static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
+    /** The TUI keeps drawing, so the screen has to grow before the wait is over. */
     private static final long AWAIT = 30_000;
+    /** A screen change: a page opens, a button appears. */
+    private static final long SHORT = 5_000;
 
+    /**
+     * What "wide enough for the agent" means, from the page that chooses the
+     * font: below about sixty columns opencode drops the footer it prints its
+     * version in. A check fits about 44 columns at the default font, so this is
+     * the number that separates a TUI page from a check page.
+     */
+    private static final int TUI_COLUMNS = 60;
+
+    /** The size the page hands the PTY, as it logs it from the emulator. */
+    private static final Pattern COLUMNS = Pattern.compile("\"cols\":(\\d+)");
+
+    /**
+     * A shell command typed at the TUI's prompt, and the text only its output
+     * can have: the directory the command runs in. A screen that merely echoed
+     * the line back cannot contain it.
+     *
+     * <p>Everything after the leading {@code !} is unshifted, and that is what
+     * lets the whole line go to the device as one list of key codes: {@code !}
+     * is shift+1, which needs a combination of its own, and "pwd" is three
+     * letters plus the Enter that submits them.
+     */
+    private static final String SHELL_INPUT = "!pwd";
+    private static final String SHELL_OUTPUT = "/data/data/com.termux/files/home";
+
+    /** Logs this test's duration; the harness keeps those in its database. */
     @Rule
     public final TestTimings timings = new TestTimings();
+
+    /**
+     * Once for the class: the command is sent on arrival, and a page asking for
+     * the permission would put a dialog in front of the terminal this reads.
+     */
+    @BeforeClass
+    public static void grantThePermission() throws Exception {
+        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+                .executeShellCommand("pm grant " + PACKAGE + " " + PERMISSION);
+    }
 
     @Test
     public void theTuiDrawsItsInterfaceInsteadOfRawEscapeSequences() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
         File screen = new File(context.getExternalFilesDir(null), "live-output.txt");
+        File events = new File(context.getExternalFilesDir(null), "events.log");
 
-        Intent tui = new Intent(context, TerminalActivity.class)
-                .putExtra("terminal_command", "opencode")
-                .putExtra("terminal_label", "opencode")
-                .putExtra("terminal_description", "TUI rendering")
-                .putExtra("terminal_title", "opencode")
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        context.startActivity(tui);
+        bringTheMainPageToFront(device, events);
+        tap(device, "Check setup", "the way to the check page");
+        long onCheckPage = events.length();
+        awaitPage(events, onCheckPage, "CheckActivity");
 
+        // A screen left by an earlier run would satisfy the wait below before
+        // this page had drawn anything.
+        if (!screen.delete() && screen.exists()) {
+            fail("the previous screen cannot be cleared, so the TUI's is unobservable: "
+                    + screen);
+        }
+
+        long started = events.length();
+        tap(device, "Open opencode", "the action that starts the TUI");
+        awaitPage(events, started, "TerminalActivity");
         String shown = awaitScreen(screen, text -> visible(text) > 20);
+
+        assertFalse("opencode is not installed, so no TUI could be drawn: install it first",
+                shown.contains("command not found"));
+        int columns = awaitColumns(events, started);
+        assertTrue("the page gave the PTY " + columns + " columns, and opencode drops its"
+                        + " footer below " + TUI_COLUMNS + ": the TUI is being drawn at a"
+                        + " check's font instead of the one \"Open opencode\" asks for",
+                columns >= TUI_COLUMNS);
+
+        // The keyboard is wired to the PTY on this page only, so this also says
+        // the page a user reaches is the one that can be typed into.
+        typeIntoTheTui(device, SHELL_INPUT);
+        String ran = awaitScreen(screen, text -> text.contains(SHELL_OUTPUT));
 
         // Leave the text behind whether it passed or not, and mark the second in
         // the recording where the TUI was on screen: a frame can be extracted
@@ -64,7 +152,7 @@ public final class OpencodeTuiTest {
         TestMilestones.mark("opencode-tui");
         try (java.io.FileOutputStream out = new java.io.FileOutputStream(
                 new File(context.getExternalFilesDir(null), "tui-screen.txt"))) {
-            out.write(shown.getBytes(StandardCharsets.UTF_8));
+            out.write(ran.getBytes(StandardCharsets.UTF_8));
         }
 
         assertFalse("the terminal interpreted the escapes instead of printing them",
@@ -84,7 +172,98 @@ public final class OpencodeTuiTest {
         return count;
     }
 
-    private String awaitScreen(File screen, java.util.function.Predicate<String> wanted)
+    /** Taps a button, failing with the label it could not find rather than NPE. */
+    private static void tap(UiDevice device, String label, String what) {
+        UiObject2 target = device.wait(Until.findObject(By.text(label)), SHORT);
+        if (target == null) {
+            fail("no " + what + " on screen: \"" + label + "\" was never published");
+        }
+        target.click();
+    }
+
+    /**
+     * Types a line at the TUI's prompt and presses Enter.
+     *
+     * <p>Nothing is written to a socket by the test: the terminal's keyboard
+     * sends each keystroke to the page, and the page on the socket Termux gave
+     * the PTY as stdin. A page without that wiring has stdin on {@code /dev/null},
+     * which is why this cannot be checked by opening the terminal around it.
+     */
+    private static void typeIntoTheTui(UiDevice device, String line) throws Exception {
+        UiObject2 terminal = device.wait(Until.findObject(By.clazz("android.webkit.WebView")), SHORT);
+        assertNotNull("the terminal is not on screen, so there is nothing to type into", terminal);
+        // Focus lands on the terminal's own input; a keystroke has nowhere to go
+        // otherwise.
+        terminal.click();
+        // "!" puts the TUI in shell mode, and it has to be a press of its own:
+        // shift+1 is a combination only keycombination can hold, and sent as
+        // committed text it is pasted into the prompt without the mode change.
+        // Both in one shell invocation delivered no keystrokes at all.
+        device.executeShellCommand("input keycombination "
+                + KeyEvent.KEYCODE_SHIFT_LEFT + " " + KeyEvent.KEYCODE_1);
+        // The rest is letters, so the line and the Enter that submits it travel
+        // as one list of key codes, at the speed a person types.
+        StringBuilder keys = new StringBuilder("input keyevent --delay 120");
+        for (char key : line.substring(1).toCharArray()) {
+            keys.append(' ').append(KeyEvent.KEYCODE_A + (key - 'a'));
+        }
+        device.executeShellCommand(keys.append(' ').append(KeyEvent.KEYCODE_ENTER).toString());
+    }
+
+    /**
+     * Gets the main page in front, the way the setup flow does: the app is
+     * reopened only when its actions are not already on screen, because the
+     * intent is delivered to an activity already in the task instead of
+     * bringing its page forward.
+     */
+    private static void bringTheMainPageToFront(UiDevice device, File events) throws Exception {
+        if (device.hasObject(By.text("Check setup"))) {
+            return;
+        }
+        long mark = events.length();
+        InstrumentationRegistry.getInstrumentation().getTargetContext().startActivity(
+                new Intent(Intent.ACTION_MAIN)
+                        .setClassName(PACKAGE, PACKAGE + ".MainActivity")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+        awaitPage(events, mark, "MainActivity");
+        assertNotNull("the main page offers no way to the check page",
+                device.findObject(By.text("Check setup")));
+    }
+
+    /** Waits for the app to say a page has been laid out, read from its own log. */
+    private static void awaitPage(File events, long mark, String page) throws Exception {
+        String wanted = "page:" + page + " ready";
+        if (!FileWatcher.await(events, () -> since(events, mark).contains(wanted), SHORT)) {
+            fail("the " + page + " page never said it was laid out");
+        }
+    }
+
+    /**
+     * The grid the page gave the PTY, as the emulator reported it.
+     *
+     * <p>Read from the app's own event log rather than from a node: the terminal
+     * publishes its finished screen to accessibility, and a TUI never finishes.
+     */
+    private static int awaitColumns(File events, long mark) throws Exception {
+        if (!FileWatcher.await(events, () -> columns(since(events, mark)) >= 0, AWAIT)) {
+            fail("the page never reported the grid it gave the PTY");
+        }
+        return columns(since(events, mark));
+    }
+
+    /** The last grid the log reports, or -1 while it reports none. */
+    private static int columns(String log) {
+        Matcher found = COLUMNS.matcher(log);
+        int last = -1;
+        while (found.find()) {
+            last = Integer.parseInt(found.group(1));
+        }
+        return last;
+    }
+
+    private String awaitScreen(File screen, Predicate<String> wanted)
             throws IOException, InterruptedException {
         java.util.function.BooleanSupplier ready = () -> {
             try {
@@ -98,6 +277,22 @@ public final class OpencodeTuiTest {
                     + read(screen).replace("\n", " | "));
         }
         return read(screen);
+    }
+
+    /** Everything the log says after {@code mark}. */
+    private static String since(File file, long mark) {
+        if (!file.isFile()) {
+            return "";
+        }
+        try (RandomAccessFile in = new RandomAccessFile(file, "r")) {
+            long start = Math.min(mark, in.length());
+            in.seek(start);
+            byte[] buffer = new byte[(int) (in.length() - start)];
+            in.readFully(buffer);
+            return new String(buffer, StandardCharsets.UTF_8);
+        } catch (IOException unreadable) {
+            return "";
+        }
     }
 
     private static String read(File file) throws IOException {
