@@ -53,6 +53,10 @@ public final class PtySizeTest {
     /** What the terminal says it is showing. */
     private static final Pattern REPORTED = Pattern.compile("\"cols\":(\\d+),\"rows\":(\\d+)");
 
+    /** What the terminal announces when its own size changes. */
+    private static final Pattern RESIZE =
+            Pattern.compile("resize:\\{\"cols\":(\\d+),\"rows\":(\\d+),");
+
     @Rule
     public final TestTimings timings = new TestTimings();
 
@@ -94,6 +98,20 @@ public final class PtySizeTest {
                 Integer.parseInt(reported.group(1)), ptyCols);
         assertEquals("the PTY has as many rows as the terminal",
                 Integer.parseInt(reported.group(2)), ptyRows);
+
+        // The terminal also announces the size on its own channel, as an event
+        // rather than as part of the screen report: that is what a page has to
+        // act on when the window moves, since a still screen publishes nothing.
+        Matcher resize = RESIZE.matcher(await(mark, RESIZE));
+        boolean announced = false;
+        while (resize.find()) {
+            if (Integer.parseInt(resize.group(1)) == ptyCols
+                    && Integer.parseInt(resize.group(2)) == ptyRows) {
+                announced = true;
+                break;
+            }
+        }
+        assertTrue("the terminal announces the grid the PTY was given", announced);
     }
 
     /** Waits for a line the app itself publishes, woken by the write itself. */

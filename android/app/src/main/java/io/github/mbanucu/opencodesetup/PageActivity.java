@@ -67,7 +67,6 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     /** The emulator's size as published in the tail report. */
     private static final Pattern COLS = Pattern.compile("\"cols\":(\\d+)");
     private static final Pattern ROWS = Pattern.compile("\"rows\":(\\d+)");
-    private static final Pattern TERMINAL = Pattern.compile("\"terminal\":(\\d+)");
     private static final String TAG = "OpencodeSetup";
 
     protected LinearLayout column;
@@ -88,8 +87,6 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private boolean keyboardShown;
     /** The tallest this window has been, which is its height without a keyboard. */
     private int tallestHeight;
-    /** The terminal's fitted height, in dp: the grid the PTY was given. */
-    private int gridHeight;
     private boolean outputLoaded;
     private boolean fillerDone;
     private boolean fullScreen;
@@ -680,37 +677,6 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         keyboardShown = tallestHeight - height > dp(120);
     }
 
-    /**
-     * Keeps the terminal at the height it was fitted to, aligned to the bottom.
-     *
-     * <p>The keyboard makes this page shorter, but the grid the PTY was given
-     * cannot shrink with it - that would reflow a program still drawing to the
-     * old grid. A terminal held at its own height and aligned bottom is clipped
-     * from the top instead of the bottom, so the rows being typed at - a TUI's
-     * composer and status line - stay on screen, which is what Termux shows when
-     * its keyboard is open.
-     */
-    private void pinGridHeight(int cssHeight) {
-        WebView box = output;
-        if (box == null || cssHeight <= 0 || cssHeight == gridHeight) {
-            return;
-        }
-        // A page whose height the intent pins is measuring the terminal, and a
-        // terminal held at an older height would no longer be what it reports:
-        // that page's frame is the authoritative size for it.
-        if (getIntent() != null && getIntent().getFloatExtra("terminal_fraction", 0f) > 0f) {
-            return;
-        }
-        gridHeight = cssHeight;
-        ViewGroup.LayoutParams params = box.getLayoutParams();
-        if (!(params instanceof FrameLayout.LayoutParams)) {
-            return;
-        }
-        params.height = dp(cssHeight);
-        ((FrameLayout.LayoutParams) params).gravity = Gravity.BOTTOM;
-        box.setLayoutParams(params);
-    }
-
     /** Shows a problem on the page, with an optional action button. */
     protected void notice(CharSequence text, int actionLabel, View.OnClickListener action) {
         ensureNotice();
@@ -1054,9 +1020,9 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
          */
         @JavascriptInterface
         public void onTail(String json) {
-            // The size travels here rather than through a call of its own: this
-            // method is the path that is known to arrive, and a dedicated
-            // call turned out to be dropped.
+            // Repeated here so whoever reads this line gets the screen and the
+            // grid it was drawn on together; a size change announces itself on
+            // {@link Screen#onResize} the moment it happens.
             java.util.regex.Matcher cols = COLS.matcher(json);
             java.util.regex.Matcher rows = ROWS.matcher(json);
             if (cols.find() && rows.find()) {
@@ -1073,17 +1039,41 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                     PageActivity.this.rows = reportedRows;
                 }
             }
-            java.util.regex.Matcher height = TERMINAL.matcher(json);
-            if (height.find()) {
-                int cssHeight = Integer.parseInt(height.group(1));
-                ui.post(() -> pinGridHeight(cssHeight));
-            }
             Runnable ready = pendingSend;
             if (ready != null) {
                 pendingSend = null;
                 ui.post(ready);
             }
             Diagnostics.log(PageActivity.this, "tail:" + json);
+        }
+
+        /**
+         * The grid and the window around it, sent the moment either moves.
+         *
+         * <p>These numbers are what the next command is sized to, so they are
+         * recorded even while a command runs; {@code frozen} in the report says
+         * whether the grid is still the one the running command was given, which
+         * it keeps until it exits - Termux cannot resize a PTY it already
+         * started, so following the window there is the app's job, not the
+         * terminal's.
+         */
+        @JavascriptInterface
+        public void onResize(String json) {
+            java.util.regex.Matcher cols = COLS.matcher(json);
+            java.util.regex.Matcher rows = ROWS.matcher(json);
+            if (cols.find() && rows.find()) {
+                int reportedColumns = Integer.parseInt(cols.group(1));
+                int reportedRows = Integer.parseInt(rows.group(1));
+                // The same guard the screen report uses: before its first fit
+                // the emulator is a couple of cells wide, and a command sent at
+                // that width is worse than one sent at the size before it.
+                if (reportedColumns >= 20 && reportedRows >= 5) {
+                    columns = reportedColumns;
+                    // Qualified: "rows" above is the matcher, not the field.
+                    PageActivity.this.rows = reportedRows;
+                }
+            }
+            Diagnostics.log(PageActivity.this, "resize:" + json);
         }
 
         /** A keystroke from the page's keyboard, on its way to the PTY. */

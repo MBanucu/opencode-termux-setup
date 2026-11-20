@@ -107,10 +107,11 @@
       // the last visible row.
       term.scrollToBottom();
       keepTailVisible();
+      reportResize();
     } catch (e) { /* hidden or not laid out yet */ }
   }
   fitNow();
-  window.addEventListener('resize', fitNow);
+  window.addEventListener('resize', function () { fitNow(); alignFrozenGrid(); reportResize(); });
 
   // Each keystroke goes back over the connection the output arrives on: the app
   // writes it to the socket Termux gave the pseudo terminal as stdin.
@@ -163,12 +164,76 @@
   window.focusTerm = function () { if (inputOn) term.focus(); };
 
   /** Stops refitting: the PTY has this grid until another page takes over. */
-  window.lockFit = function () { frozen = true; };
-  window.freezeFit = function () { frozen = true; };
+  window.lockFit = function () { frozen = true; alignFrozenGrid(); reportResize(); };
+  window.freezeFit = function () { frozen = true; alignFrozenGrid(); reportResize(); };
 
   /** Lets a reused page measure itself again for a new intent. */
-  window.thawFit = function () { frozen = false; fitNow(); };
+  window.thawFit = function () { frozen = false; fitNow(); reportResize(); };
   window.fitNow = fitNow;
+
+  /** The last size the app was told, so a window that has not moved sends none. */
+  var lastResize = '';
+
+  /**
+   * Announces the grid and the window it sits in, as soon as either moves.
+   *
+   * <p>Until now the size only reached the app folded into the screen report,
+   * which is published four times a second at best and not at all while the
+   * screen is still. A resize is an event, not a state to poll: the keyboard
+   * opening, a rotation and the window regaining height all change what the next
+   * command should be sized to, and while a command runs the app decides from
+   * {@code frozen} whether these numbers are the grid the PTY has or only the
+   * window around it - Termux cannot resize a PTY it has already started.
+   */
+  function reportResize() {
+    if (!window.AndroidBridge) {
+      return;
+    }
+    var area = document.getElementById('screen').getBoundingClientRect();
+    var state = JSON.stringify({
+      cols: term.cols,
+      rows: term.rows,
+      width: Math.round(area.width),
+      height: Math.round(area.height),
+      frozen: frozen
+    });
+    if (state === lastResize) {
+      return;
+    }
+    lastResize = state;
+    window.AndroidBridge.onResize(state);
+  }
+
+  /**
+   * Holds a frozen grid's bottom against the bottom of the area it is drawn in.
+   *
+   * <p>The grid is the one the PTY was given, so a window that just got shorter
+   * cannot shrink it. Left alone the terminal clips its newest rows, which in a
+   * TUI are the composer and the status line being typed into; shifted up it
+   * clips the oldest instead, the way a terminal with a resizable PTY keeps the
+   * cursor in view.
+   */
+  function alignFrozenGrid() {
+    var area = document.getElementById('screen').getBoundingClientRect();
+    var rows = document.querySelector('.xterm-rows');
+    var box = document.querySelector('.xterm');
+    if (!rows || !box) {
+      return;
+    }
+    var hidden = rows.getBoundingClientRect().height - area.height;
+    box.style.transform = hidden > 1 ? 'translateY(-' + Math.round(hidden) + 'px)' : '';
+  }
+
+  // The window's own resize event is not enough: a frozen grid ignores it, and
+  // the element can be given a new size - the keyboard shortening the page -
+  // without the browser's window changing at all.
+  if (window.ResizeObserver) {
+    new ResizeObserver(function () {
+      alignFrozenGrid();
+      reportResize();
+    }).observe(document.getElementById('screen'));
+  }
+  reportResize();
 
   /** The whole scrollback as plain text, so the page's node can report it. */
   function screenText() {

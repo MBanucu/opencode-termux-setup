@@ -64,6 +64,23 @@ correct while the evidence file stayed empty. It now publishes
 When a page renders but its output file does not, suspect the slice before the
 wiring.
 
+## A resize is an event, not a state to poll
+
+The terminal's size used to reach the app only inside the 250 ms `tail` report,
+so a page whose screen was still published nothing: the keyboard opening stayed
+invisible until the next tick, and a frozen grid - one a running command owns -
+never said anything at all. `terminal.html` now calls `AndroidBridge.onResize`
+the moment the grid or the element around it moves, reporting
+`{"cols","rows","width","height","frozen"}` into `events.log`; `PtySizeTest`
+asserts the announced grid is the one the PTY was given.
+
+`frozen` is the part worth knowing: Termux cannot resize a PTY that already
+started, so the page holds the grid and shifts it up by the height the window
+lost, keeping the newest rows (a TUI's composer) on screen. Do not pin the
+terminal's height from the Android side instead: the element then never changes
+size, so no event is sent and the app is back to guessing. That pin lived in
+`PageActivity` for one commit and is what this replaced.
+
 ## A failing suite is usually leftover device state
 
 `SetupFlowTest` failed in `@Before` on `aMainScreenOffersTheFourActions`:
