@@ -64,6 +64,38 @@ correct while the evidence file stayed empty. It now publishes
 When a page renders but its output file does not, suspect the slice before the
 wiring.
 
+## A hairline border is not the renderer's fault
+
+opencode's composer border looked like hairlines, so the DOM renderer was blamed
+and `@xterm/addon-canvas` (0.7.0, 94,607 B) was vendored into `assets/xterm/` to
+take over. It attaches, and it changes nothing: the probe screenshot with and
+without it is **99.96 % identical**.
+
+Two things had to be right before it would even attach, and both look like "no
+effect". It must be loaded after `term.open()`: before that, `screenElement` is
+undefined, `new CanvasRenderer(...)` throws, and a `try/catch` around the load
+hides it. Attached, `events.log` says `canvas:"attached"` and four `<canvas>`
+layers exist - and `.xterm-rows` is gone, which is the real cost: `keepTailVisible`,
+`tailInfo` (`fits`, `row`, `bottom`) and `alignFrozenGrid` all read those divs, so
+switching renderers means rewriting the page's own measurements for a
+pixel-identical result.
+
+The glyph was never the problem. `GridProbeTest` rows of `▀`, `▄` and `┃` paint
+full-width 18 px bars at font 8 (cell 36.4 device px), with palette ink and with
+`38;2;…`/`48;2;…` true colour, in the DOM renderer and in canvas alike. Read back
+from the buffer, opencode's border cells are `▀` with a 24-bit `fg #1E1E1E` on
+`bg #0A0A0A`: the border is dark because opencode draws it dark, and no renderer
+can brighten a colour a program chose.
+
+So when a TUI's border looks wrong, read the cell before replacing the renderer.
+`term.buffer.active.getLine(row).getCell(col)` gives `getChars()`, `getFgColor()`,
+`getFgColorMode()` (50331648 is RGB) and the bold/dim/inverse flags, and a
+`window.AndroidBridge.onTail(JSON.stringify({...}))` carrying a few of them is how
+they reach `events.log` - the page has no console forwarder.
+
+The addon and those diagnostics were reverted; the page draws with the DOM
+renderer.
+
 ## A resize is an event, not a state to poll
 
 The terminal's size used to reach the app only inside the 250 ms `tail` report,
