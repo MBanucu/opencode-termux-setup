@@ -258,23 +258,35 @@
   }
 
   /**
-   * Holds a frozen grid's bottom against the bottom of the area it is drawn in.
+   * Holds a frozen grid's bottom against the bottom of the area it is drawn in,
+   * and puts half of the width the cells cannot use on each side.
    *
    * <p>The grid is the one the PTY was given, so a window that just got shorter
    * cannot shrink it. Left alone the terminal clips its newest rows, which in a
    * TUI are the composer and the status line being typed into; shifted up it
    * clips the oldest instead, the way a terminal with a resizable PTY keeps the
    * cursor in view.
+   *
+   * <p>Cells are a fixed width, so the area is almost never an exact number of
+   * them: the fraction left over used to sit entirely on the right, which a TUI
+   * that fills its background paints as a lighter strip down that edge. Half on
+   * each side reads as a symmetric margin instead.
    */
   function alignFrozenGrid() {
     var area = document.getElementById('screen').getBoundingClientRect();
-    var rows = document.querySelector('.xterm-rows');
+    var screen = document.querySelector('.xterm-screen');
     var box = document.querySelector('.xterm');
-    if (!rows || !box) {
+    if (!screen || !box) {
       return;
     }
-    var hidden = rows.getBoundingClientRect().height - area.height;
-    box.style.transform = hidden > 1 ? 'translateY(-' + Math.round(hidden) + 'px)' : '';
+    var rect = screen.getBoundingClientRect();
+    var hidden = rect.height - area.height;
+    var spare = Math.max(0, area.width - rect.width);
+    var sideways = spare > 0.5 ? Math.round(spare / 2) : 0;
+    var up = hidden > 1 ? Math.round(hidden) : 0;
+    box.style.transform = sideways || up
+      ? 'translate(' + sideways + 'px,' + (up ? -up : 0) + 'px)'
+      : '';
   }
 
   // The window's own resize event is not enough: the element can be given a new
