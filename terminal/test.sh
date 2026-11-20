@@ -24,6 +24,7 @@ javac -nowarn --release 17 -d "$work" \
     "$here/src/main/java/io/github/mbanucu/terminal/Selection.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/KeyEncoder.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/ReplySink.java" \
+    "$here/src/main/java/io/github/mbanucu/terminal/Modes.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/Replies.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/TestSupport.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/CursorTest.java" \
@@ -37,6 +38,7 @@ javac -nowarn --release 17 -d "$work" \
     "$here/src/test/java/io/github/mbanucu/terminal/ViewportTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/SelectionTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/KeyEncoderTest.java" \
+    "$here/src/test/java/io/github/mbanucu/terminal/CharacterTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/QueryReplyTest.java"
 java -cp "$work" io.github.mbanucu.terminal.CursorTest
 java -cp "$work" io.github.mbanucu.terminal.EraseTest
@@ -49,4 +51,5 @@ java -cp "$work" io.github.mbanucu.terminal.ScrollbackTest
 java -cp "$work" io.github.mbanucu.terminal.ViewportTest
 java -cp "$work" io.github.mbanucu.terminal.SelectionTest
 java -cp "$work" io.github.mbanucu.terminal.KeyEncoderTest
+java -cp "$work" io.github.mbanucu.terminal.CharacterTest
 java -cp "$work" io.github.mbanucu.terminal.QueryReplyTest

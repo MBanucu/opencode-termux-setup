@@ -25,6 +25,7 @@ final class Screen implements EscapeParser.Handler {
     /** Where answers to a program's queries go; null means stay quiet. */
     private ReplySink replySink;
     private final CsiCommands commands = new CsiCommands(this);
+    private final Modes modes = new Modes();
     private char[][] main;
     private char[][] alt;
     /** Whether each row of the primary buffer continues on the next row. */
@@ -58,16 +59,6 @@ final class Screen implements EscapeParser.Handler {
     private int cursorCol;
     private boolean wrapPending;
     private boolean alternate;
-    /** DEC mode 25: whether the program has left the caret on. */
-    private boolean cursorVisible = true;
-    /** DEC mode 12 / DECSCUSR: whether the caret should blink. */
-    private boolean cursorBlink;
-    /** DECCKM: arrows and Home/End use SS3 (ESC O) instead of CSI. */
-    private boolean applicationCursor;
-    /** Between ?2026h and ?2026l, mode changes wait for the frame to end. */
-    private boolean syncUpdate;
-    private boolean pendingCursorVisible;
-    private boolean hasPendingCursorVisible;
     private int savedRow;
     private int savedCol;
     private int scrollTop;
@@ -294,17 +285,17 @@ final class Screen implements EscapeParser.Handler {
 
     /** True while the program has left the caret on, as DEC mode 25 says. */
     boolean cursorVisible() {
-        return cursorVisible;
+        return modes.cursorVisible();
     }
 
     /** True while the program asked for a blinking caret (mode 12 or DECSCUSR). */
     boolean cursorBlink() {
-        return cursorBlink;
+        return modes.cursorBlink();
     }
 
     /** True while DECCKM is on and cursor keys should use the SS3 forms. */
     boolean applicationCursorKeys() {
-        return applicationCursor;
+        return modes.applicationCursors();
     }
 
     // --- input -----------------------------------------------------------------
@@ -406,43 +397,17 @@ final class Screen implements EscapeParser.Handler {
     }
 
     /**
-     * The private modes this app understands: the alternate screen, the caret
-     * the view draws, and a program's bracket around one repaint.
+     * The private modes this app understands. The caret, DECCKM and the
+     * synchronized update are state that outlives one sequence, so they live in
+     * {@link Modes}; the alternate screen swaps buffers, so the screen keeps it.
      */
     private void applyModes(String[] parts, boolean set) {
         for (String part : parts) {
             int mode = number(part, 0);
-            if (mode == 2026) {
-                // Synchronized update: the program brackets a repaint and
-                // expects it to be applied at the end, not sequence by
-                // sequence.
-                if (set) {
-                    syncUpdate = true;
-                } else {
-                    syncUpdate = false;
-                    if (hasPendingCursorVisible) {
-                        cursorVisible = pendingCursorVisible;
-                        hasPendingCursorVisible = false;
-                    }
-                }
-            } else if (mode == 25) {
-                // The caret is the terminal's to draw; a full-screen program
-                // turns it off while it repaints and on when it wants it back.
-                // Reading those as they arrive is what hid opencode's caret:
-                // it hides at the start of every frame and shows it at the
-                // end, so the last word inside the update is the one that
-                // counts.
-                if (syncUpdate) {
-                    pendingCursorVisible = set;
-                    hasPendingCursorVisible = true;
-                } else {
-                    cursorVisible = set;
-                }
-            } else if (mode == 1) {
-                applicationCursor = set;
-            } else if (mode == 12) {
-                cursorBlink = set;
-            } else if (mode == 47 || mode == 1047 || mode == 1049) {
+            if (modes.apply(mode, set)) {
+                continue;
+            }
+            if (mode == 47 || mode == 1047 || mode == 1049) {
                 setAlternate(set);
             }
         }
@@ -473,7 +438,7 @@ final class Screen implements EscapeParser.Handler {
                 return;
             }
         }
-        cursorBlink = style != 0 && style % 2 == 1;
+        modes.setCursorStyle(style);
     }
 
     private static int number(String[] parts, int index, int fallback) {
@@ -836,8 +801,7 @@ final class Screen implements EscapeParser.Handler {
             return;
         }
         // A program that leaves mid-update must not leave the caret deferred.
-        syncUpdate = false;
-        hasPendingCursorVisible = false;
+        modes.endUpdate();
         if (on) {
             savedRow = cursorRow;
             savedCol = cursorCol;

@@ -3,8 +3,8 @@ package io.github.mbanucu.terminal;
 import static io.github.mbanucu.terminal.TestSupport.check;
 
 /**
- * Checks the bytes a hardware key sends, in normal and application-cursor
- * mode, including the control and escape forms of modified characters.
+ * Checks the bytes a named hardware key sends, in normal and application-cursor
+ * mode; typed characters are covered by {@link CharacterTest}.
  */
 public final class KeyEncoderTest {
 
@@ -94,16 +94,6 @@ public final class KeyEncoderTest {
                 encode(KeyEncoder.LEFT, false, true, false, true));
         check("modified Down stays CSI in application mode", "\033[1;2B",
                 encode(KeyEncoder.DOWN, false, false, true, true));
-        check("Ctrl+C is the control byte", "\003",
-                KeyEncoder.encodeCharacter('c', true, false));
-        check("Ctrl+Space is NUL", "\000",
-                KeyEncoder.encodeCharacter(' ', true, false));
-        check("Ctrl+[ is ESC", "\033",
-                KeyEncoder.encodeCharacter('[', true, false));
-        check("Alt+x prefixes ESC", "\033x",
-                KeyEncoder.encodeCharacter('x', false, true));
-        check("Ctrl+Alt+C keeps both", "\033\003",
-                KeyEncoder.encodeCharacter('c', true, true));
     }
 
     private static void unknownKey() {
