@@ -6,9 +6,9 @@
 <link rel="stylesheet" href="xterm/xterm.css">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #101418; overflow: hidden; }
-  /* Extra room at the bottom: the frame is rounded and clipped, so a row sitting
-     flush against the edge reads as cut off. */
-  #screen { width: 100%; height: 100%; padding: 8px 8px 22px; box-sizing: border-box; }
+  /* No inner margin: the frame around this is square now, so the grid can use
+     every pixel it is given. */
+  #screen { width: 100%; height: 100%; padding: 0; box-sizing: border-box; }
   .xterm .xterm-viewport { background: #101418 !important; }
 </style>
 </head>
@@ -159,6 +159,9 @@
 
   window.resetTerm = function () { term.reset(); waiting = false; };
 
+  /** Puts the cursor in the emulator's textarea, so typed keys have a target. */
+  window.focusTerm = function () { if (inputOn) term.focus(); };
+
   /** Stops refitting: the PTY has this grid until another page takes over. */
   window.lockFit = function () { frozen = true; };
   window.freezeFit = function () { frozen = true; };
@@ -189,7 +192,7 @@
    *
    * <p>This is what "the last line is fully visible" means where it can be
    * measured: the row's bottom edge must not be past the area's, so it cannot be
-   * clipped by the rounded frame. A test asserts it at several terminal heights
+   * clipped at the bottom edge. A test asserts it at several terminal heights
    * instead of trusting a screenshot.
    */
   function tailInfo() {

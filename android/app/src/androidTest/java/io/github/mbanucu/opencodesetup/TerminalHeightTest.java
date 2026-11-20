@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
  * The last line of the terminal has to be readable at every height it can take.
  *
  * <p>A screenshot cannot answer that question: it shows one height, and the
- * clipping that matters happens at the rounded bottom edge of the frame. The
+ * clipping that matters happens at the bottom edge of the terminal's own area. The
  * terminal page reports the geometry of its newest line
  * ({@code tail:{"fits":true,"terminal":900,...}}), and this test reads it at three
  * heights the page is asked to use through an intent extra.

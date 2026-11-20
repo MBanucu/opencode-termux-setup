@@ -61,7 +61,7 @@
             android:label="@string/check_title" />
 
         <!-- A confirmed command gets this page: header, the terminal filling the
-             screen, footer with copy and cancel. Not exported. -->
+             screen, footer with Ctrl, the keyboard and copy. Not exported. -->
         <activity
             android:name=".TerminalActivity"
             android:exported="false"

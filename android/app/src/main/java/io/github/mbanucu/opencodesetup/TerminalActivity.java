@@ -9,11 +9,9 @@ import android.os.Bundle;
  *
  * <p>Once a page has the user's consent - Start setup, Remove opencode, Run check
  * - the command is handed to this page, which runs it on arrival. The header keeps
- * the way back and the name of the action, the footer keeps copy and cancel, and
- * everything between belongs to the terminal.
- *
- * <p>Cancel only leaves the page: Termux's background runner is already working,
- * and the app has no way to stop a command it did not fork.
+ * the way back and the name of the action, the footer keeps the keys a terminal
+ * needs - Ctrl and the keyboard - and a small copy, and everything between
+ * belongs to the terminal.
  */
 public final class TerminalActivity extends PageActivity {
 

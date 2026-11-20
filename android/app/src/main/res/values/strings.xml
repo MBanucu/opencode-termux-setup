@@ -27,6 +27,9 @@ If a command is refused, Termux\'s \"allow external apps\" setting must be enabl
     <string name="output_waiting">Running in Termux…</string>
     <string name="back">Back</string>
     <string name="copy_output">Copy output</string>
+    <string name="copy_short">Copy</string>
+    <string name="key_ctrl">Ctrl</string>
+    <string name="key_keyboard">Keyboard</string>
 
     <string name="consent_title">Download about 70 MB?</string>
     <string name="consent_message">Termux will add a signed APT repository and install:

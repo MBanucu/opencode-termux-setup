@@ -7,6 +7,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -20,7 +21,7 @@ import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewOutlineProvider;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -79,6 +80,12 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private View terminalFrame;
     private ProgressBar busy;
     private Button copyButton;
+    private Button ctrlButton;
+    private Button keyboardButton;
+    /** Ctrl, waiting for the one key it applies to. */
+    private volatile boolean ctrlArmed;
+    /** Whether the soft keyboard is covering part of the page. */
+    private boolean keyboardShown;
     private boolean outputLoaded;
     private boolean fillerDone;
     private boolean fullScreen;
@@ -169,8 +176,9 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
      * Switches this page to a terminal-first layout.
      *
      * <p>A header with the way back, the terminal taking every pixel between it
-     * and the footer, and a footer with copy and cancel: after a command has been
-     * confirmed, the output is the only thing left to look at.
+     * and the footer, and a footer with the keys a terminal needs - Ctrl and the
+     * keyboard - plus a small copy: after a command has been confirmed, the
+     * output is the only thing left to look at.
      */
     protected void terminalPage(CharSequence title) {
         fullScreen = true;
@@ -205,6 +213,9 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         column = root;
         page = null;
         setContentView(root);
+        // The keyboard covering part of the page is how the footer's key learns
+        // whether tapping it shows or hides.
+        root.getViewTreeObserver().addOnGlobalLayoutListener(this::keyboardChanged);
     }
 
     /**
@@ -451,18 +462,25 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 return false;
             });
 
-            // Rounded and outlined, so the terminal reads as a window in the page
-            // instead of a black rectangle pasted onto it.
+            // Square and unlidded: every pixel the rounded frame and its inset
+            // used to spend on shape is a cell the program on the other side of
+            // the PTY gets to draw on.
             FrameLayout frame = new FrameLayout(this);
-            GradientDrawable shape = new GradientDrawable();
-            shape.setColor(0xFF101418);
-            shape.setCornerRadius(dp(10));
-            shape.setStroke(dp(1), 0xFF2A303A);
-            frame.setBackground(shape);
-            frame.setClipToOutline(true);
-            frame.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
             frame.addView(web, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+            // The progress strip is laid over the terminal's top edge rather than
+            // sitting below it: below, it was off a full-screen page's screen,
+            // and as a sibling it also shortened the terminal the moment a
+            // command started - after the PTY had been sized to the taller grid,
+            // so a row went missing.
+            busy = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+            busy.setIndeterminate(true);
+            busy.setVisibility(View.GONE);
+            FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, dp(4));
+            progressParams.gravity = Gravity.TOP;
+            frame.addView(busy, progressParams);
             frame.setVisibility(View.GONE);
             terminalFrame = frame;
 
@@ -494,14 +512,6 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             }
             column.addView(frame, params);
 
-            busy = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-            busy.setIndeterminate(true);
-            busy.setVisibility(View.GONE);
-            LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(4));
-            progressParams.bottomMargin = dp(8);
-            column.addView(busy, progressParams);
-
             copyButton = new Button(this);
             copyButton.setText(R.string.copy_output);
             copyButton.setAllCaps(false);
@@ -509,22 +519,41 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             copyButton.setOnClickListener(v -> copy(screen));
 
             if (fullScreen) {
-                // Footer: copy and cancel side by side, always within reach of a
-                // thumb while the terminal above scrolls on its own.
-                copyButton.setEnabled(false);
+                // Footer: the keys a terminal on a phone needs, and a copy small
+                // enough not to compete with them. There is no cancel: Back in
+                // the header already leaves, and it only ever left the command
+                // running in Termux, which this app cannot stop.
                 LinearLayout footer = new LinearLayout(this);
                 footer.setOrientation(LinearLayout.HORIZONTAL);
+                footer.setGravity(Gravity.CENTER_VERTICAL);
                 footer.setPadding(0, dp(8), 0, 0);
-                footer.addView(copyButton, new LinearLayout.LayoutParams(
-                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-                Button cancel = new Button(this);
-                cancel.setText(R.string.consent_cancel);
-                cancel.setAllCaps(false);
-                cancel.setOnClickListener(v -> finish());
-                LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(
-                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-                cancelParams.leftMargin = dp(8);
-                footer.addView(cancel, cancelParams);
+                if (inputEnabled) {
+                    // Ctrl first, as in Termux: a TUI cannot be used without it,
+                    // because ^C interrupts a program and ^D ends one.
+                    ctrlButton = key(R.string.key_ctrl);
+                    ctrlButton.setOnClickListener(v -> setCtrlArmed(!ctrlArmed));
+                    footer.addView(ctrlButton, keyParams(0));
+                    keyboardButton = key(R.string.key_keyboard);
+                    keyboardButton.setOnClickListener(v -> toggleKeyboard());
+                    footer.addView(keyboardButton, keyParams(8));
+                }
+                // Pushed to the end: copying is the smallest thing on the page.
+                footer.addView(new View(this), new LinearLayout.LayoutParams(0, 0, 1f));
+                copyButton.setEnabled(false);
+                copyButton.setText(R.string.copy_short);
+                copyButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                copyButton.setTextColor(0xFF9AA4B2);
+                copyButton.setMinWidth(0);
+                copyButton.setMinimumWidth(0);
+                copyButton.setMinHeight(0);
+                copyButton.setMinimumHeight(0);
+                copyButton.setPadding(dp(10), dp(4), dp(10), dp(4));
+                GradientDrawable copyShape = new GradientDrawable();
+                copyShape.setColor(0x00000000);
+                copyShape.setCornerRadius(dp(6));
+                copyShape.setStroke(dp(1), 0xFF2A303A);
+                copyButton.setBackground(copyShape);
+                footer.addView(copyButton, keyParams(8));
                 column.addView(footer);
             } else {
                 // Only meaningful once there is output; hidden until then, so it
@@ -545,6 +574,92 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             web.loadUrl("file:///android_asset/terminal.html" + query);
         }
         return output;
+    }
+
+    /**
+     * One key of the terminal's footer, in the flat style of Termux's extra keys:
+     * dark, outlined, monospace, and as wide as its label rather than the page.
+     */
+    private Button key(int label) {
+        Button view = new Button(this);
+        view.setText(label);
+        view.setAllCaps(false);
+        view.setTypeface(Typeface.MONOSPACE);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        view.setTextColor(0xFFDCDCDC);
+        view.setMinWidth(0);
+        view.setMinimumWidth(0);
+        view.setMinHeight(0);
+        view.setMinimumHeight(0);
+        view.setPadding(dp(14), dp(6), dp(14), dp(6));
+        view.setBackground(keyShape(false));
+        return view;
+    }
+
+    /** The outline a footer key has: filled while Ctrl is waiting. */
+    private GradientDrawable keyShape(boolean armed) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(armed ? 0xFF2F6FB2 : 0xFF161B22);
+        shape.setCornerRadius(dp(8));
+        shape.setStroke(dp(1), armed ? 0xFF2F6FB2 : 0xFF2A303A);
+        return shape;
+    }
+
+    private LinearLayout.LayoutParams keyParams(int leftMargin) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.leftMargin = dp(leftMargin);
+        return params;
+    }
+
+    /** Arms Ctrl for exactly one key, and shows that it is waiting. */
+    private void setCtrlArmed(boolean armed) {
+        ctrlArmed = armed;
+        if (ctrlButton == null) {
+            return;
+        }
+        ctrlButton.setBackground(keyShape(armed));
+        ctrlButton.setTextColor(armed ? 0xFFFFFFFF : 0xFFDCDCDC);
+    }
+
+    /**
+     * Shows or hides the keyboard under the terminal.
+     *
+     * <p>Termux has a key for this, and so does this page: the keyboard covers
+     * rows a full-screen program is drawing on, and hiding it is how those rows
+     * come back without leaving the page.
+     */
+    private void toggleKeyboard() {
+        WebView box = output;
+        InputMethodManager ime =
+                (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (box == null || ime == null) {
+            return;
+        }
+        if (keyboardShown) {
+            ime.hideSoftInputFromWindow(box.getWindowToken(), 0);
+            return;
+        }
+        box.requestFocus();
+        // xterm collects keystrokes in a textarea of its own; focusing the web
+        // view alone leaves the keyboard with no element to type into.
+        script("focusTerm()");
+        ime.showSoftInput(box, InputMethodManager.SHOW_IMPLICIT);
+    }
+
+    /**
+     * Notices the keyboard coming and going, so the footer's key still does the
+     * right thing after the keyboard was dismissed by hand.
+     */
+    private void keyboardChanged() {
+        View content = findViewById(android.R.id.content);
+        if (content == null) {
+            return;
+        }
+        Rect visible = new Rect();
+        content.getWindowVisibleDisplayFrame(visible);
+        keyboardShown = content.getRootView().getHeight() - visible.bottom > dp(120);
     }
 
     /** Shows a problem on the page, with an optional action button. */
@@ -918,7 +1033,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         /** A keystroke from the page's keyboard, on its way to the PTY. */
         @JavascriptInterface
         public void onInput(String base64) {
-            byte[] bytes = Base64.decode(base64, Base64.NO_WRAP);
+            byte[] bytes = control(Base64.decode(base64, Base64.NO_WRAP));
             // Only the size: what a user types into an agent can be private.
             Diagnostics.log(PageActivity.this, "input:" + bytes.length);
             liveStream.send(bytes);
@@ -951,6 +1066,55 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                     output.setContentDescription(text);
                 }
             });
+        }
+    }
+
+    /**
+     * The key typed while Ctrl was armed, as the control code it names.
+     *
+     * <p>Ctrl is spent on that one key, whether or not it names a control code,
+     * the way a terminal's own Ctrl key behaves.
+     */
+    private byte[] control(byte[] typed) {
+        if (!ctrlArmed || typed.length == 0) {
+            return typed;
+        }
+        ui.post(() -> setCtrlArmed(false));
+        int code = controlCode((char) typed[0]);
+        if (code < 0) {
+            return typed;
+        }
+        byte[] out = typed.clone();
+        out[0] = (byte) code;
+        return out;
+    }
+
+    /** The code Ctrl turns a character into, or -1 when it leaves it alone. */
+    private static int controlCode(char typed) {
+        if (typed >= 'a' && typed <= 'z') {
+            return typed - 'a' + 1;
+        }
+        if (typed >= 'A' && typed <= 'Z') {
+            return typed - 'A' + 1;
+        }
+        switch (typed) {
+            case ' ':
+            case '@':
+                return 0;
+            case '[':
+                return 27;
+            case '\\':
+                return 28;
+            case ']':
+                return 29;
+            case '^':
+                return 30;
+            case '_':
+                return 31;
+            case '?':
+                return 127;
+            default:
+                return -1;
         }
     }
 
