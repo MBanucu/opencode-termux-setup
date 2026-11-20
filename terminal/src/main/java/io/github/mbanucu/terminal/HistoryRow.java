@@ -15,11 +15,13 @@ final class HistoryRow {
     private final char[] chars;
     private final int[] fg;
     private final int[] bg;
+    private final boolean wrapped;
 
-    HistoryRow(char[] chars, int[] fg, int[] bg) {
+    HistoryRow(char[] chars, int[] fg, int[] bg, boolean wrapped) {
         this.chars = chars;
         this.fg = fg;
         this.bg = bg;
+        this.wrapped = wrapped;
     }
 
     String text() {
@@ -38,6 +40,11 @@ final class HistoryRow {
         return col >= 0 && col < bg.length ? bg[col] : 0;
     }
 
+    /** True when this row continued on the next one. */
+    boolean wrapped() {
+        return wrapped;
+    }
+
     HistoryRow resize(int newCols) {
         if (newCols == chars.length) {
             return this;
@@ -50,6 +57,6 @@ final class HistoryRow {
         System.arraycopy(chars, 0, nextChars, 0, keep);
         System.arraycopy(fg, 0, nextFg, 0, keep);
         System.arraycopy(bg, 0, nextBg, 0, keep);
-        return new HistoryRow(nextChars, nextFg, nextBg);
+        return new HistoryRow(nextChars, nextFg, nextBg, wrapped);
     }
 }

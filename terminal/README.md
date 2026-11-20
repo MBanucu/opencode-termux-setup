@@ -39,6 +39,10 @@ in half is held until it is complete. `screenText()` returns the primary screen'
 history above the visible grid; on the alternate screen it returns only that
 screen, because a full-screen program owns the display.
 
+A row the terminal wrapped itself is marked as continuing on the next row, and
+`text()`/`screenText()` join the two instead of inserting a newline the program
+never wrote; the flag follows the row into history and survives a resize.
+
 Dragging the view scrolls back through the primary screen's history, and a fling
 carries on at finger speed. While scrolled back, output that pushes rows into
 history keeps the row being read in place rather than sliding it away; a view at

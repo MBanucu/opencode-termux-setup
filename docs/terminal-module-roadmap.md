@@ -108,8 +108,9 @@ beyond the flag.
 - [x] Add a history buffer for the primary screen; keep the alternate screen
   separate, as a full-screen program owns its grid.
 - [x] Preserve cells and foreground/background across history and resize.
-- [ ] Preserve wrap information across history and resize (a row is stored as
-  cells today).
+- [x] Preserve wrap information across history and resize: a wrapped row stays
+  marked through scrolling, line inserts/deletes and a resize, and extracted
+  text joins it to its continuation.
 - [x] Add a scroll offset to `TerminalView`; follow output only while the view
   is at the bottom; return to the bottom on input.
 - [x] Touch drag/fling scrolling; the caret is not drawn while scrolled back,
@@ -121,9 +122,10 @@ beyond the flag.
 - [ ] View tests still needed: an instrumented drag/fling on a device, and
   resize while scrolled.
 
-Model state: 133 screen checks and 34 viewport checks pass. The view keeps a
-scroll offset, follows output only at the bottom, and drags or flings the
-history; the 3000-line stress case is covered by the model test.
+Model state: screen and viewport checks pass. The view keeps a scroll offset,
+follows output only at the bottom, and drags or flings the history; the
+3000-line stress case is covered by the model test. Wrap flags travel with a
+row into history and through resizes and line edits.
 
 ### 1.2 Selection and copy
 

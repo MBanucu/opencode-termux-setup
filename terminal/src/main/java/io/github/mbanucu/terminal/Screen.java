@@ -26,6 +26,11 @@ final class Screen {
     private final StringBuilder pending = new StringBuilder();
     private char[][] main;
     private char[][] alt;
+    /** Whether each row of the primary buffer continues on the next row. */
+    private boolean[] mainWrapped;
+    private boolean[] altWrapped;
+    /** Whether each row of the buffer being drawn into continues below. */
+    private boolean[] wrapped;
     /** Foreground per cell as 0xRRGGBB, or 0 for the view's default. */
     private int[][] mainFg;
     private int[][] altFg;
@@ -80,9 +85,12 @@ final class Screen {
         altFg = blankColours();
         mainBg = blankColours();
         altBg = blankColours();
+        mainWrapped = new boolean[rows];
+        altWrapped = new boolean[rows];
         cells = main;
         colours = mainFg;
         backgrounds = mainBg;
+        wrapped = mainWrapped;
         scrollBottom = rows - 1;
     }
 
@@ -110,9 +118,12 @@ final class Screen {
         altFg = copyColours(altFg, cols, rows, newCols, newRows);
         mainBg = copyColours(mainBg, cols, rows, newCols, newRows);
         altBg = copyColours(altBg, cols, rows, newCols, newRows);
+        mainWrapped = copyFlags(mainWrapped, rows, newRows);
+        altWrapped = copyFlags(altWrapped, rows, newRows);
         cells = alternate ? alt : main;
         colours = alternate ? altFg : mainFg;
         backgrounds = alternate ? altBg : mainBg;
+        wrapped = alternate ? altWrapped : mainWrapped;
         cols = newCols;
         rows = newRows;
         scrollTop = 0;
@@ -139,6 +150,12 @@ final class Screen {
         for (int row = 0; row < Math.min(fromRows, toRows); row++) {
             System.arraycopy(from[row], 0, to[row], 0, Math.min(fromCols, toCols));
         }
+        return to;
+    }
+
+    private static boolean[] copyFlags(boolean[] from, int fromRows, int toRows) {
+        boolean[] to = new boolean[toRows];
+        System.arraycopy(from, 0, to, 0, Math.min(fromRows, toRows));
         return to;
     }
 
@@ -191,7 +208,12 @@ final class Screen {
             last--;
         }
         for (int row = 0; row <= last; row++) {
-            all.append(line(row)).append('\n');
+            all.append(line(row));
+            // A wrapped row is one logical line cut by the width, so it gets no
+            // newline the program never wrote.
+            if (!wrapped(row)) {
+                all.append('\n');
+            }
         }
         return all.toString();
     }
@@ -205,7 +227,10 @@ final class Screen {
         }
         StringBuilder all = new StringBuilder();
         for (HistoryRow row : history) {
-            all.append(row.text()).append('\n');
+            all.append(row.text());
+            if (!row.wrapped()) {
+                all.append('\n');
+            }
         }
         all.append(text());
         return all.toString();
@@ -238,6 +263,16 @@ final class Screen {
             return 0;
         }
         return history.get(row).background(col);
+    }
+
+    /** True when the row continues on the next one because it filled the width. */
+    boolean wrapped(int row) {
+        return row >= 0 && row < rows && wrapped[row];
+    }
+
+    /** True when a history row continued on the next one. */
+    boolean historyWrapped(int row) {
+        return row >= 0 && row < history.size() && history.get(row).wrapped();
     }
 
     /** True while the program is on the alternate screen, i.e. a full-screen app. */
@@ -634,6 +669,9 @@ final class Screen {
 
     private void put(char c) {
         if (wrapPending) {
+            // The row is full and the next glyph continues it: remember that so
+            // copy joins the two halves instead of inventing a line break.
+            wrapped[cursorRow] = true;
             cursorCol = 0;
             newline();
             wrapPending = false;
@@ -685,10 +723,12 @@ final class Screen {
                 System.arraycopy(cells[row + 1], 0, cells[row], 0, cols);
                 System.arraycopy(colours[row + 1], 0, colours[row], 0, cols);
                 System.arraycopy(backgrounds[row + 1], 0, backgrounds[row], 0, cols);
+                wrapped[row] = wrapped[row + 1];
             }
             Arrays.fill(cells[scrollBottom], ' ');
             Arrays.fill(colours[scrollBottom], 0);
             Arrays.fill(backgrounds[scrollBottom], currentBg);
+            wrapped[scrollBottom] = false;
         }
     }
 
@@ -698,7 +738,7 @@ final class Screen {
             return;
         }
         history.add(new HistoryRow(cells[scrollTop].clone(), colours[scrollTop].clone(),
-                backgrounds[scrollTop].clone()));
+                backgrounds[scrollTop].clone(), wrapped[scrollTop]));
         while (history.size() > historyLimit) {
             history.remove(0);
         }
@@ -710,10 +750,12 @@ final class Screen {
                 System.arraycopy(cells[row - 1], 0, cells[row], 0, cols);
                 System.arraycopy(colours[row - 1], 0, colours[row], 0, cols);
                 System.arraycopy(backgrounds[row - 1], 0, backgrounds[row], 0, cols);
+                wrapped[row] = wrapped[row - 1];
             }
             Arrays.fill(cells[scrollTop], ' ');
             Arrays.fill(colours[scrollTop], 0);
             Arrays.fill(backgrounds[scrollTop], currentBg);
+            wrapped[scrollTop] = false;
         }
     }
 
@@ -740,6 +782,7 @@ final class Screen {
             for (int[] row : backgrounds) {
                 Arrays.fill(row, currentBg);
             }
+            Arrays.fill(wrapped, false);
             return;
         }
         if (mode == 1) {
@@ -747,6 +790,7 @@ final class Screen {
                 Arrays.fill(cells[row], ' ');
                 Arrays.fill(colours[row], 0);
                 Arrays.fill(backgrounds[row], currentBg);
+                wrapped[row] = false;
             }
             Arrays.fill(cells[cursorRow], 0, Math.min(cols, cursorCol + 1), ' ');
             Arrays.fill(colours[cursorRow], 0, Math.min(cols, cursorCol + 1), 0);
@@ -760,6 +804,7 @@ final class Screen {
             Arrays.fill(cells[row], ' ');
             Arrays.fill(colours[row], 0);
             Arrays.fill(backgrounds[row], currentBg);
+            wrapped[row] = false;
         }
     }
 
@@ -768,6 +813,7 @@ final class Screen {
             Arrays.fill(cells[cursorRow], ' ');
             Arrays.fill(colours[cursorRow], 0);
             Arrays.fill(backgrounds[cursorRow], currentBg);
+            wrapped[cursorRow] = false;
         } else if (mode == 1) {
             Arrays.fill(cells[cursorRow], 0, Math.min(cols, cursorCol + 1), ' ');
             Arrays.fill(colours[cursorRow], 0, Math.min(cols, cursorCol + 1), 0);
@@ -817,10 +863,12 @@ final class Screen {
                 System.arraycopy(cells[row - 1], 0, cells[row], 0, cols);
                 System.arraycopy(colours[row - 1], 0, colours[row], 0, cols);
                 System.arraycopy(backgrounds[row - 1], 0, backgrounds[row], 0, cols);
+                wrapped[row] = wrapped[row - 1];
             }
             Arrays.fill(cells[cursorRow], ' ');
             Arrays.fill(colours[cursorRow], 0);
             Arrays.fill(backgrounds[cursorRow], currentBg);
+            wrapped[cursorRow] = false;
         }
     }
 
@@ -830,10 +878,12 @@ final class Screen {
                 System.arraycopy(cells[row + 1], 0, cells[row], 0, cols);
                 System.arraycopy(colours[row + 1], 0, colours[row], 0, cols);
                 System.arraycopy(backgrounds[row + 1], 0, backgrounds[row], 0, cols);
+                wrapped[row] = wrapped[row + 1];
             }
             Arrays.fill(cells[scrollBottom], ' ');
             Arrays.fill(colours[scrollBottom], 0);
             Arrays.fill(backgrounds[scrollBottom], currentBg);
+            wrapped[scrollBottom] = false;
         }
     }
 
@@ -851,6 +901,7 @@ final class Screen {
             cells = alt;
             colours = altFg;
             backgrounds = altBg;
+            wrapped = altWrapped;
             for (char[] row : alt) {
                 Arrays.fill(row, ' ');
             }
@@ -860,6 +911,7 @@ final class Screen {
             for (int[] row : altBg) {
                 Arrays.fill(row, 0);
             }
+            Arrays.fill(altWrapped, false);
             cursorRow = 0;
             cursorCol = 0;
         } else {
@@ -867,6 +919,7 @@ final class Screen {
             cells = main;
             colours = mainFg;
             backgrounds = mainBg;
+            wrapped = mainWrapped;
             cursorRow = savedRow;
             cursorCol = savedCol;
             clamp();
