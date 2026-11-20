@@ -13,6 +13,7 @@ mkdir -p "$work"
 
 javac -nowarn --release 17 -d "$work" \
     "$here/src/main/java/io/github/mbanucu/terminal/Screen.java" \
+    "$here/src/main/java/io/github/mbanucu/terminal/Sgr.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/EscapeParser.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/Scrollback.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/HistoryRow.java" \
@@ -21,14 +22,18 @@ javac -nowarn --release 17 -d "$work" \
     "$here/src/main/java/io/github/mbanucu/terminal/Selection.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/KeyEncoder.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/TestSupport.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/ScreenTest.java" \
+    "$here/src/test/java/io/github/mbanucu/terminal/CursorTest.java" \
+    "$here/src/test/java/io/github/mbanucu/terminal/EditTest.java" \
+    "$here/src/test/java/io/github/mbanucu/terminal/SequenceTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/ColourTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/WritingTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/ScrollbackTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/ViewportTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/SelectionTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/KeyEncoderTest.java"
-java -cp "$work" io.github.mbanucu.terminal.ScreenTest
+java -cp "$work" io.github.mbanucu.terminal.CursorTest
+java -cp "$work" io.github.mbanucu.terminal.EditTest
+java -cp "$work" io.github.mbanucu.terminal.SequenceTest
 java -cp "$work" io.github.mbanucu.terminal.ColourTest
 java -cp "$work" io.github.mbanucu.terminal.WritingTest
 java -cp "$work" io.github.mbanucu.terminal.ScrollbackTest

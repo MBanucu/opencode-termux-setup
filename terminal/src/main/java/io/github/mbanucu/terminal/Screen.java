@@ -41,9 +41,7 @@ final class Screen implements EscapeParser.Handler {
     private int[][] colours;
     /** The backgrounds of the buffer being drawn into. */
     private int[][] backgrounds;
-    private int currentFg;
-    private int currentBg;
-    private boolean bold;
+    private final Sgr sgr = new Sgr();
     /** The last character written, for REP: a run of spaces is one REP. */
     private char lastChar = ' ';
     private int cols;
@@ -466,7 +464,7 @@ final class Screen implements EscapeParser.Handler {
                 clamp();
                 break;
             case 'm':
-                sgr(parts);
+                sgr.apply(parts);
                 break;
             case 'q':
                 cursorStyle(parts);
@@ -492,83 +490,6 @@ final class Screen implements EscapeParser.Handler {
             }
         }
         cursorBlink = style != 0 && style % 2 == 1;
-    }
-
-    /**
-     * SGR: the colour of the text and of the cell behind it.
-     *
-     * <p>16 colours, 256 and truecolor for both, with {@code 1} brightening a
-     * palette foreground. Underline, reverse and the rest are dropped: a cell is
-     * one glyph and one background here, and a reader is given text either way.
-     */
-    private void sgr(String[] parts) {
-        if (parts.length == 0) {
-            currentFg = 0;
-            currentBg = 0;
-            bold = false;
-            return;
-        }
-        for (int i = 0; i < parts.length; i++) {
-            int code = number(parts, i, 0);
-            if (code >= 30 && code <= 37) {
-                currentFg = AnsiPalette.palette(code - 30);
-            } else if (code >= 90 && code <= 97) {
-                currentFg = AnsiPalette.palette(code - 90 + 8);
-            } else if (code == 38) {
-                i = extended(parts, i, false);
-            } else if (code == 48) {
-                i = extended(parts, i, true);
-            } else if (code >= 40 && code <= 47) {
-                currentBg = AnsiPalette.palette(code - 40);
-            } else if (code >= 100 && code <= 107) {
-                currentBg = AnsiPalette.palette(code - 100 + 8);
-            } else if (code == 0) {
-                currentFg = 0;
-                currentBg = 0;
-                bold = false;
-            } else if (code == 1) {
-                bold = true;
-            } else if (code == 22) {
-                bold = false;
-            } else if (code == 39) {
-                currentFg = 0;
-            } else if (code == 49) {
-                currentBg = 0;
-            }
-        }
-    }
-
-    /**
-     * Reads {@code 38/48;5;n} or {@code 38/48;2;r;g;b}, and returns the last index
-     * used. The same two forms name a foreground and a background.
-     */
-    private int extended(String[] parts, int index, boolean background) {
-        int kind = number(parts, index + 1, -1);
-        if (kind == 5) {
-            int n = number(parts, index + 2, -1);
-            if (n >= 0 && n < 256) {
-                setColour(background, AnsiPalette.colour256(n));
-            }
-            return index + 2;
-        }
-        if (kind == 2) {
-            int red = number(parts, index + 2, -1);
-            int green = number(parts, index + 3, -1);
-            int blue = number(parts, index + 4, -1);
-            if (red >= 0 && green >= 0 && blue >= 0) {
-                setColour(background, (red << 16) | (green << 8) | blue);
-            }
-            return index + 4;
-        }
-        return index;
-    }
-
-    private void setColour(boolean background, int colour) {
-        if (background) {
-            currentBg = colour;
-        } else {
-            currentFg = colour;
-        }
     }
 
     private static int number(String[] parts, int index, int fallback) {
@@ -631,8 +552,8 @@ final class Screen implements EscapeParser.Handler {
         cells[cursorRow][cursorCol] = c;
         // Bold is applied here, not when the code is read: SGR 22 turns it off
         // for what follows and leaves what is already on screen bright.
-        colours[cursorRow][cursorCol] = bold ? AnsiPalette.brighten(currentFg) : currentFg;
-        backgrounds[cursorRow][cursorCol] = currentBg;
+        colours[cursorRow][cursorCol] = sgr.drawnForeground();
+        backgrounds[cursorRow][cursorCol] = sgr.background();
         lastChar = c;
         if (cursorCol >= cols - 1) {
             wrapPending = true;
@@ -679,7 +600,7 @@ final class Screen implements EscapeParser.Handler {
             }
             Arrays.fill(cells[scrollBottom], ' ');
             Arrays.fill(colours[scrollBottom], 0);
-            Arrays.fill(backgrounds[scrollBottom], currentBg);
+            Arrays.fill(backgrounds[scrollBottom], sgr.background());
             wrapped[scrollBottom] = false;
         }
     }
@@ -700,7 +621,7 @@ final class Screen implements EscapeParser.Handler {
             }
             Arrays.fill(cells[scrollTop], ' ');
             Arrays.fill(colours[scrollTop], 0);
-            Arrays.fill(backgrounds[scrollTop], currentBg);
+            Arrays.fill(backgrounds[scrollTop], sgr.background());
             wrapped[scrollTop] = false;
         }
     }
@@ -726,7 +647,7 @@ final class Screen implements EscapeParser.Handler {
                 Arrays.fill(row, 0);
             }
             for (int[] row : backgrounds) {
-                Arrays.fill(row, currentBg);
+                Arrays.fill(row, sgr.background());
             }
             Arrays.fill(wrapped, false);
             return;
@@ -735,21 +656,21 @@ final class Screen implements EscapeParser.Handler {
             for (int row = 0; row < cursorRow; row++) {
                 Arrays.fill(cells[row], ' ');
                 Arrays.fill(colours[row], 0);
-                Arrays.fill(backgrounds[row], currentBg);
+                Arrays.fill(backgrounds[row], sgr.background());
                 wrapped[row] = false;
             }
             Arrays.fill(cells[cursorRow], 0, Math.min(cols, cursorCol + 1), ' ');
             Arrays.fill(colours[cursorRow], 0, Math.min(cols, cursorCol + 1), 0);
-            Arrays.fill(backgrounds[cursorRow], 0, Math.min(cols, cursorCol + 1), currentBg);
+            Arrays.fill(backgrounds[cursorRow], 0, Math.min(cols, cursorCol + 1), sgr.background());
             return;
         }
         Arrays.fill(cells[cursorRow], cursorCol, cols, ' ');
         Arrays.fill(colours[cursorRow], cursorCol, cols, 0);
-        Arrays.fill(backgrounds[cursorRow], cursorCol, cols, currentBg);
+        Arrays.fill(backgrounds[cursorRow], cursorCol, cols, sgr.background());
         for (int row = cursorRow + 1; row < rows; row++) {
             Arrays.fill(cells[row], ' ');
             Arrays.fill(colours[row], 0);
-            Arrays.fill(backgrounds[row], currentBg);
+            Arrays.fill(backgrounds[row], sgr.background());
             wrapped[row] = false;
         }
     }
@@ -758,16 +679,16 @@ final class Screen implements EscapeParser.Handler {
         if (mode == 2) {
             Arrays.fill(cells[cursorRow], ' ');
             Arrays.fill(colours[cursorRow], 0);
-            Arrays.fill(backgrounds[cursorRow], currentBg);
+            Arrays.fill(backgrounds[cursorRow], sgr.background());
             wrapped[cursorRow] = false;
         } else if (mode == 1) {
             Arrays.fill(cells[cursorRow], 0, Math.min(cols, cursorCol + 1), ' ');
             Arrays.fill(colours[cursorRow], 0, Math.min(cols, cursorCol + 1), 0);
-            Arrays.fill(backgrounds[cursorRow], 0, Math.min(cols, cursorCol + 1), currentBg);
+            Arrays.fill(backgrounds[cursorRow], 0, Math.min(cols, cursorCol + 1), sgr.background());
         } else {
             Arrays.fill(cells[cursorRow], cursorCol, cols, ' ');
             Arrays.fill(colours[cursorRow], cursorCol, cols, 0);
-            Arrays.fill(backgrounds[cursorRow], cursorCol, cols, currentBg);
+            Arrays.fill(backgrounds[cursorRow], cursorCol, cols, sgr.background());
         }
     }
 
@@ -775,7 +696,7 @@ final class Screen implements EscapeParser.Handler {
         int end = Math.min(cols, cursorCol + count);
         Arrays.fill(cells[cursorRow], cursorCol, end, ' ');
         Arrays.fill(colours[cursorRow], cursorCol, end, 0);
-        Arrays.fill(backgrounds[cursorRow], cursorCol, end, currentBg);
+        Arrays.fill(backgrounds[cursorRow], cursorCol, end, sgr.background());
     }
 
     private void deleteChars(int count) {
@@ -787,7 +708,7 @@ final class Screen implements EscapeParser.Handler {
         Arrays.fill(row, cols - Math.min(count, cols - cursorCol), cols, ' ');
         Arrays.fill(colours[cursorRow], cols - Math.min(count, cols - cursorCol), cols, 0);
         Arrays.fill(backgrounds[cursorRow], cols - Math.min(count, cols - cursorCol), cols,
-                currentBg);
+                sgr.background());
     }
 
     private void insertChars(int count) {
@@ -800,7 +721,7 @@ final class Screen implements EscapeParser.Handler {
                 cursorCol + shift, cols - cursorCol - shift);
         Arrays.fill(row, cursorCol, cursorCol + shift, ' ');
         Arrays.fill(colours[cursorRow], cursorCol, cursorCol + shift, 0);
-        Arrays.fill(backgrounds[cursorRow], cursorCol, cursorCol + shift, currentBg);
+        Arrays.fill(backgrounds[cursorRow], cursorCol, cursorCol + shift, sgr.background());
     }
 
     private void insertLines(int count) {
@@ -813,7 +734,7 @@ final class Screen implements EscapeParser.Handler {
             }
             Arrays.fill(cells[cursorRow], ' ');
             Arrays.fill(colours[cursorRow], 0);
-            Arrays.fill(backgrounds[cursorRow], currentBg);
+            Arrays.fill(backgrounds[cursorRow], sgr.background());
             wrapped[cursorRow] = false;
         }
     }
@@ -828,7 +749,7 @@ final class Screen implements EscapeParser.Handler {
             }
             Arrays.fill(cells[scrollBottom], ' ');
             Arrays.fill(colours[scrollBottom], 0);
-            Arrays.fill(backgrounds[scrollBottom], currentBg);
+            Arrays.fill(backgrounds[scrollBottom], sgr.background());
             wrapped[scrollBottom] = false;
         }
     }

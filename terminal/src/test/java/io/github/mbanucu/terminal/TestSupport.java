@@ -20,6 +20,17 @@ final class TestSupport {
         return String.format("0x%06x", colour);
     }
 
+    static Screen numberedRows(int rows) {
+        Screen screen = new Screen(20, rows);
+        for (int row = 0; row < rows; row++) {
+            screen.feed(String.valueOf(row));
+            if (row < rows - 1) {
+                screen.feed("\r\n");
+            }
+        }
+        return screen;
+    }
+
     static void check(String what, String expected, String actual) {
         if (expected.equals(actual)) {
             passed++;
