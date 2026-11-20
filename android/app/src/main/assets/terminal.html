@@ -15,6 +15,12 @@
      edge of an otherwise full-width screen. Hidden, the grid uses the whole
      window and a touch drag still scrolls through the scrollback. */
   .xterm .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
+  /* Bundled so the box-drawing, block and ambiguous glyphs a TUI draws
+     come from a font whose advance is the cell, not from a fallback. */
+  @font-face {
+    font-family: 'Terminal Mono';
+    src: url('terminal-mono.ttf') format('truetype');
+  }
 </style>
 </head>
 <body>
@@ -23,6 +29,10 @@
 <script src="xterm/addon-fit.js"></script>
 <script>
 (function () {
+  var booted = false;
+  function boot() {
+    if (booted) return;
+    booted = true;
   // A page that asked for a denser grid - a TUI needs one - carries the size in
   // its URL. It has to be known before the first fit: the PTY is sized to the
   // cells that fit, and a font set afterwards would leave the program drawing to
@@ -43,7 +53,7 @@
       brightYellow: '#F0D197', brightBlue: '#82C7FF', brightMagenta: '#D79AE8',
       brightCyan: '#7FD6DF', brightWhite: '#FFFFFF'
     },
-    fontFamily: 'monospace',
+    fontFamily: "'Terminal Mono', monospace",
     fontSize: fontPx > 0 ? fontPx : 13,
     cursorBlink: true,
     // The bundle Termux returns uses "\n" where the PTY used "\r\n"; a real
@@ -356,6 +366,19 @@
   // user waits on an empty terminal.
   fitNow();
   publish();
+  }
+
+  // xterm measures its cell when the terminal opens. A font that arrives
+  // after that leaves the grid sized from whatever fallback was loaded, which
+  // is how the box-drawing rows ended up a fraction of a cell off.
+  // Never wait on the font: a missing or blocked file would leave the page
+  // blank, and whichever call runs first wins the guard above.
+  setTimeout(boot, 1500);
+  if (document.fonts && document.fonts.load) {
+    document.fonts.load("8px 'Terminal Mono'").then(boot, boot);
+  } else {
+    boot();
+  }
 })();
 </script>
 </body>
