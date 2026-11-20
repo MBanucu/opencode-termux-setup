@@ -23,14 +23,6 @@ final class Screen {
     /** The xterm page's scrollback depth, so the native view starts at parity. */
     static final int DEFAULT_HISTORY_LINES = 3000;
 
-    /** The 16 answers to SGR 30-37 and 90-97, the Tango palette. */
-    private static final int[] ANSI = {
-        0x000000, 0xCC0000, 0x4E9A06, 0xC4A000,
-        0x3465A4, 0x75507B, 0x06989A, 0xD3D7CF,
-        0x555753, 0xEF2929, 0x8AE234, 0xFCE94F,
-        0x729FCF, 0xAD7FA8, 0x34E2E2, 0xEEEEEC,
-    };
-
     private final StringBuilder pending = new StringBuilder();
     private char[][] main;
     private char[][] alt;
@@ -350,48 +342,59 @@ final class Screen {
         boolean privateMode = raw.startsWith("?");
         String body = privateMode ? raw.substring(1) : raw;
         String[] parts = body.isEmpty() ? new String[0] : body.split(";", -1);
-        if (privateMode && (last == 'h' || last == 'l')) {
-            for (String part : parts) {
-                int mode = number(part, 0);
-                if (mode == 2026) {
-                    // Synchronized update: the program brackets a repaint and
-                    // expects it to be applied at the end, not sequence by
-                    // sequence.
-                    if (last == 'h') {
-                        syncUpdate = true;
-                    } else {
-                        syncUpdate = false;
-                        if (hasPendingCursorVisible) {
-                            cursorVisible = pendingCursorVisible;
-                            hasPendingCursorVisible = false;
-                        }
-                    }
-                } else if (mode == 25) {
-                    // The caret is the terminal's to draw; a full-screen program
-                    // turns it off while it repaints and on when it wants it back.
-                    // Reading those as they arrive is what hid opencode's caret:
-                    // it hides at the start of every frame and shows it at the
-                    // end, so the last word inside the update is the one that
-                    // counts.
-                    if (syncUpdate) {
-                        pendingCursorVisible = last == 'h';
-                        hasPendingCursorVisible = true;
-                    } else {
-                        cursorVisible = last == 'h';
-                    }
-                } else if (mode == 12) {
-                    cursorBlink = last == 'h';
-                } else if (mode == 47 || mode == 1047 || mode == 1049) {
-                    setAlternate(last == 'h');
-                }
+        if (privateMode) {
+            if (last == 'h' || last == 'l') {
+                applyModes(parts, last == 'h');
             }
             return;
         }
-        if (privateMode) {
-            // DA/DSR and the kitty keyboard query are private sequences, not
-            // cursor saves: CSI ? u must not read as CSI u.
-            return;
+        dispatch(parts, last);
+        wrapPending = false;
+    }
+
+    /**
+     * The private modes this app understands: the alternate screen, the caret
+     * the view draws, and a program's bracket around one repaint.
+     */
+    private void applyModes(String[] parts, boolean set) {
+        for (String part : parts) {
+            int mode = number(part, 0);
+            if (mode == 2026) {
+                // Synchronized update: the program brackets a repaint and
+                // expects it to be applied at the end, not sequence by
+                // sequence.
+                if (set) {
+                    syncUpdate = true;
+                } else {
+                    syncUpdate = false;
+                    if (hasPendingCursorVisible) {
+                        cursorVisible = pendingCursorVisible;
+                        hasPendingCursorVisible = false;
+                    }
+                }
+            } else if (mode == 25) {
+                // The caret is the terminal's to draw; a full-screen program
+                // turns it off while it repaints and on when it wants it back.
+                // Reading those as they arrive is what hid opencode's caret:
+                // it hides at the start of every frame and shows it at the
+                // end, so the last word inside the update is the one that
+                // counts.
+                if (syncUpdate) {
+                    pendingCursorVisible = set;
+                    hasPendingCursorVisible = true;
+                } else {
+                    cursorVisible = set;
+                }
+            } else if (mode == 12) {
+                cursorBlink = set;
+            } else if (mode == 47 || mode == 1047 || mode == 1049) {
+                setAlternate(set);
+            }
         }
+    }
+
+    /** The non-private sequences: where text goes, and what is erased. */
+    private void dispatch(String[] parts, char last) {
         switch (last) {
             case 'H':
             case 'f':
@@ -486,7 +489,6 @@ final class Screen {
                 // status), q (cursor shape): nothing to place.
                 break;
         }
-        wrapPending = false;
     }
 
     /**
@@ -522,17 +524,17 @@ final class Screen {
         for (int i = 0; i < parts.length; i++) {
             int code = number(parts, i, 0);
             if (code >= 30 && code <= 37) {
-                currentFg = ANSI[code - 30];
+                currentFg = AnsiPalette.palette(code - 30);
             } else if (code >= 90 && code <= 97) {
-                currentFg = ANSI[code - 90 + 8];
+                currentFg = AnsiPalette.palette(code - 90 + 8);
             } else if (code == 38) {
                 i = extended(parts, i, false);
             } else if (code == 48) {
                 i = extended(parts, i, true);
             } else if (code >= 40 && code <= 47) {
-                currentBg = ANSI[code - 40];
+                currentBg = AnsiPalette.palette(code - 40);
             } else if (code >= 100 && code <= 107) {
-                currentBg = ANSI[code - 100 + 8];
+                currentBg = AnsiPalette.palette(code - 100 + 8);
             } else if (code == 0) {
                 currentFg = 0;
                 currentBg = 0;
@@ -558,7 +560,7 @@ final class Screen {
         if (kind == 5) {
             int n = number(parts, index + 2, -1);
             if (n >= 0 && n < 256) {
-                setColour(background, palette256(n));
+                setColour(background, AnsiPalette.colour256(n));
             }
             return index + 2;
         }
@@ -580,33 +582,6 @@ final class Screen {
         } else {
             currentFg = colour;
         }
-    }
-
-    private static int palette256(int n) {
-        if (n < 16) {
-            return ANSI[n];
-        }
-        if (n < 232) {
-            int cube = n - 16;
-            return (level(cube / 36) << 16) | (level((cube % 36) / 6) << 8) | level(cube % 6);
-        }
-        int grey = 8 + (n - 232) * 10;
-        return (grey << 16) | (grey << 8) | grey;
-    }
-
-    /** SGR 1: the bright entry for a palette colour, and nothing for the rest. */
-    private static int brighten(int colour) {
-        for (int i = 0; i < 8; i++) {
-            if (ANSI[i] == colour) {
-                return ANSI[i + 8];
-            }
-        }
-        return colour;
-    }
-
-    /** The 6 levels of the 256-colour cube: 0, 95, 135, 175, 215, 255. */
-    private static int level(int step) {
-        return step == 0 ? 0 : 55 + step * 40;
     }
 
     private static int number(String[] parts, int index, int fallback) {
@@ -666,7 +641,7 @@ final class Screen {
         cells[cursorRow][cursorCol] = c;
         // Bold is applied here, not when the code is read: SGR 22 turns it off
         // for what follows and leaves what is already on screen bright.
-        colours[cursorRow][cursorCol] = bold ? brighten(currentFg) : currentFg;
+        colours[cursorRow][cursorCol] = bold ? AnsiPalette.brighten(currentFg) : currentFg;
         backgrounds[cursorRow][cursorCol] = currentBg;
         lastChar = c;
         if (cursorCol >= cols - 1) {
@@ -859,50 +834,6 @@ final class Screen {
             Arrays.fill(cells[scrollBottom], ' ');
             Arrays.fill(colours[scrollBottom], 0);
             Arrays.fill(backgrounds[scrollBottom], currentBg);
-        }
-    }
-
-    /** One row of primary-screen history, with the colours its cells had. */
-    private static final class HistoryRow {
-        private final char[] chars;
-        private final int[] fg;
-        private final int[] bg;
-
-        HistoryRow(char[] chars, int[] fg, int[] bg) {
-            this.chars = chars;
-            this.fg = fg;
-            this.bg = bg;
-        }
-
-        String text() {
-            int end = chars.length;
-            while (end > 0 && (chars[end - 1] == ' ' || chars[end - 1] == 0)) {
-                end--;
-            }
-            return new String(chars, 0, end);
-        }
-
-        int foreground(int col) {
-            return col >= 0 && col < fg.length ? fg[col] : 0;
-        }
-
-        int background(int col) {
-            return col >= 0 && col < bg.length ? bg[col] : 0;
-        }
-
-        HistoryRow resize(int newCols) {
-            if (newCols == chars.length) {
-                return this;
-            }
-            char[] nextChars = new char[newCols];
-            Arrays.fill(nextChars, ' ');
-            int[] nextFg = new int[newCols];
-            int[] nextBg = new int[newCols];
-            int keep = Math.min(newCols, chars.length);
-            System.arraycopy(chars, 0, nextChars, 0, keep);
-            System.arraycopy(fg, 0, nextFg, 0, keep);
-            System.arraycopy(bg, 0, nextBg, 0, keep);
-            return new HistoryRow(nextChars, nextFg, nextBg);
         }
     }
 

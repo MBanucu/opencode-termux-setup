@@ -58,6 +58,21 @@ page has today.
 - [ ] The app uses the module. `PageActivity` still loads
   `assets/terminal.html` in a `WebView`; xterm.js still renders the page.
 
+## Structure
+
+The module is kept in small files with one job each, so a change lands in the
+file named for it:
+
+- [x] `Viewport` — the window over history and the live grid.
+- [x] `HistoryRow` — one stored history row and its colours.
+- [x] `AnsiPalette` — the 16-colour palette, the 256 cube and bold brightening.
+- [x] `TerminalAccessibility` — row nodes, the prompt node, events and the
+  announcement timer.
+- [x] `Screen.csi` splits into private-mode handling (`applyModes`) and the
+  non-private dispatch (`dispatch`).
+- [ ] Keep key encoding and query replies in their own files (`KeyEncoder`,
+  `QueryReplies`) when 1.3 and 1.4 add their tables.
+
 ## Phase 0 — decide the shape
 
 - [ ] Choose the integration surface. Prefer a new native terminal page (or a

@@ -6,7 +6,6 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
-import android.os.Bundle;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.SpannableStringBuilder;
@@ -14,9 +13,6 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
-import android.view.ViewParent;
-import android.view.accessibility.AccessibilityEvent;
-import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.inputmethod.BaseInputConnection;
@@ -62,14 +58,6 @@ public final class TerminalView extends View {
         void onGridSize(int cols, int rows);
     }
 
-    /** The host view's virtual id: AccessibilityNodeProvider.HOST_VIEW_ID is API 26. */
-    private static final int HOST = NO_ID;
-    /** The prompt, as an editable node: one id no row ever uses. */
-    private static final int INPUT_NODE = 1_000_000;
-    /** Row ids are fixed by position, so a reader's focus survives a repaint. */
-    private static final int FIRST_ROW_ID = 100;
-    /** A TUI repaints constantly; speak only once it has been quiet this long. */
-    private static final long ANNOUNCE_QUIET_MS = 400;
     /**
      * The narrowest grid worth giving a program.
      *
@@ -86,19 +74,16 @@ public final class TerminalView extends View {
     private final Screen screen = new Screen(80, 24);
     private final Viewport viewport = new Viewport(screen);
     private final SpannableStringBuilder input = new SpannableStringBuilder();
+    private final TerminalAccessibility accessibility =
+            new TerminalAccessibility(this, screen, viewport, input);
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     /** The bundled monospace face, or the system one when the host has no asset. */
     private final Typeface typeface;
-    private String[] lastRows = new String[screen.rows()];
     private float cellHeight = 1;
     private float cellWidth = 1;
-    private int accessibilityFocusedRow = NO_ID;
     private Listener listener;
     private RawInput rawInput;
     private SizeListener sizeListener;
-    /** Announces finished rows; a screen reader hears them as they settle. */
-    private boolean announceOutput = true;
-    private String pendingAnnouncement;
     /** A caret blinks about twice a second, as terminals have always done. */
     private static final long BLINK_MS = 530;
     /** The caret's on/off phase while the program asked for a blinking one. */
@@ -112,14 +97,6 @@ public final class TerminalView extends View {
     private VelocityTracker touchVelocity;
     /** Carries a drag on after the finger lifts. */
     private final Scroller flinger = new Scroller(getContext());
-
-    private final Runnable announcer = () -> {
-        String line = pendingAnnouncement;
-        pendingAnnouncement = null;
-        if (line != null) {
-            announce(line);
-        }
-    };
 
     /**
      * Flips the caret while the program wants it blinking.
@@ -186,7 +163,7 @@ public final class TerminalView extends View {
     }
 
     public void setAnnounceOutput(boolean announceOutput) {
-        this.announceOutput = announceOutput;
+        accessibility.setAnnounceOutput(announceOutput);
     }
 
     // --- screen ----------------------------------------------------------------
@@ -204,38 +181,8 @@ public final class TerminalView extends View {
         viewport.clamp();
         invalidate();
         startBlinking();
-        notifyContentChanged();
-        announceSettledRows();
-    }
-
-    /**
-     * Announces at most one dump of text per quiet period.
-     *
-     * <p>A TUI repaints several times a second, and an event per changed row would
-     * be a stream of speech nobody can follow; waiting for the screen to settle
-     * and then saying what appeared is the closest thing to usable without a full
-     * "read from here" model.
-     */
-    private void announceSettledRows() {
-        if (!announceOutput) {
-            return;
-        }
-        String changed = null;
-        for (int row = 0; row < screen.rows(); row++) {
-            String now = screen.line(row);
-            if (!now.equals(lastRows[row])) {
-                lastRows[row] = now;
-                if (!now.isEmpty()) {
-                    changed = now;
-                }
-            }
-        }
-        if (changed == null) {
-            return;
-        }
-        pendingAnnouncement = changed;
-        removeCallbacks(announcer);
-        postDelayed(announcer, ANNOUNCE_QUIET_MS);
+        accessibility.contentChanged();
+        accessibility.announceSettledRows();
     }
 
     /** The grid's cursor as {@code row,col}: what the sample logs, and what a test can assert. */
@@ -288,15 +235,11 @@ public final class TerminalView extends View {
         if (cols != screen.cols() || rows != screen.rows()) {
             screen.resize(cols, rows);
             viewport.clamp();
-            lastRows = new String[screen.rows()];
-            for (int row = 0; row < screen.rows(); row++) {
-                lastRows[row] = screen.line(row);
-            }
-            accessibilityFocusedRow = NO_ID;
+            accessibility.resetRows();
             if (sizeListener != null) {
                 sizeListener.onGridSize(cols, rows);
             }
-            notifyContentChanged();
+            accessibility.contentChanged();
         }
         invalidate();
     }
@@ -528,7 +471,7 @@ public final class TerminalView extends View {
      * now rather than into a prompt this view does not draw on the alternate
      * screen.
      */
-    private boolean forwardsRawInput() {
+    boolean forwardsRawInput() {
         return rawInput != null && screen.isAlternate();
     }
 
@@ -586,7 +529,7 @@ public final class TerminalView extends View {
                 if (touchDragging) {
                     fling((int) touchVelocity.getYVelocity());
                 } else {
-                    focusForTyping();
+                    accessibility.focusForTyping();
                 }
                 recycleVelocity();
                 return true;
@@ -631,230 +574,28 @@ public final class TerminalView extends View {
         postInvalidateOnAnimation();
     }
 
-    private void submit() {
+    void submit() {
         String line = input.toString();
         input.clear();
         inputChanged();
-        notifyTextChanged(line);
+        accessibility.submitted(line);
         if (listener != null) {
             listener.onLine(line);
         }
     }
 
-    private void inputChanged() {
+    void inputChanged() {
         // Typing is for the live prompt, so it brings a scrolled-back view home.
         viewport.scrollToBottom();
         invalidate();
-        AccessibilityEvent event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED);
-        event.setPackageName(getContext().getPackageName());
-        event.setClassName("android.widget.EditText");
-        event.setSource(this, INPUT_NODE);
-        event.getText().add(input.toString());
-        event.setFromIndex(0);
-        event.setAddedCount(input.length());
-        send(event);
+        accessibility.textChanged();
     }
 
     // --- accessibility ---------------------------------------------------------
 
-    /** The rows of the grid that have text, each with a stable id, and the prompt. */
-    private final AccessibilityNodeProvider provider = new AccessibilityNodeProvider() {
-        @Override
-        public AccessibilityNodeInfo createAccessibilityNodeInfo(int virtualViewId) {
-            if (virtualViewId == HOST) {
-                return hostNode();
-            }
-            if (virtualViewId == INPUT_NODE) {
-                return inputNode();
-            }
-            int row = virtualViewId - FIRST_ROW_ID;
-            if (row >= 0 && row < screen.rows() && !viewport.line(row).isEmpty()) {
-                return rowNode(row);
-            }
-            return null;
-        }
-
-        @Override
-        public boolean performAction(int virtualViewId, int action, Bundle arguments) {
-            if (virtualViewId == INPUT_NODE) {
-                if (action == AccessibilityNodeInfo.ACTION_SET_TEXT) {
-                    CharSequence text = arguments == null ? null
-                            : arguments.getCharSequence(
-                                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE);
-                    String value = text == null ? "" : text.toString();
-                    // A screen reader that sets text ending in a newline means
-                    // "run this line": there is no other way for a service to
-                    // press Enter on a terminal that is not an EditText.
-                    boolean run = value.endsWith("\n") || value.endsWith("\r");
-                    if (run) {
-                        value = value.substring(0, value.length() - 1);
-                    }
-                    if (forwardsRawInput()) {
-                        if (!value.isEmpty()) {
-                            rawInput.onInput(value);
-                        }
-                        if (run) {
-                            rawInput.onInput("\r");
-                        }
-                        return true;
-                    }
-                    input.replace(0, input.length(), value);
-                    inputChanged();
-                    if (run) {
-                        submit();
-                    }
-                    return true;
-                }
-                if (action == AccessibilityNodeInfo.ACTION_CLICK
-                        || action == AccessibilityNodeInfo.ACTION_FOCUS) {
-                    return focusForTyping();
-                }
-                return false;
-            }
-            int row = virtualViewId - FIRST_ROW_ID;
-            if (row < 0 || row >= screen.rows()) {
-                return false;
-            }
-            if (action == AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) {
-                if (accessibilityFocusedRow != NO_ID) {
-                    sendVirtualEvent(AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED,
-                            accessibilityFocusedRow, null);
-                }
-                accessibilityFocusedRow = virtualViewId;
-                sendVirtualEvent(AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
-                        virtualViewId, viewport.line(row));
-                return true;
-            }
-            if (action == AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS
-                    && accessibilityFocusedRow == virtualViewId) {
-                accessibilityFocusedRow = NO_ID;
-                sendVirtualEvent(AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED,
-                        virtualViewId, null);
-                return true;
-            }
-            if (action == AccessibilityNodeInfo.ACTION_CLICK) {
-                return true;
-            }
-            return false;
-        }
-
-        @Override
-        public AccessibilityNodeInfo findFocus(int focus) {
-            if (focus == AccessibilityNodeInfo.FOCUS_INPUT && hasFocus()) {
-                return inputNode();
-            }
-            if (focus == AccessibilityNodeInfo.FOCUS_ACCESSIBILITY
-                    && accessibilityFocusedRow != NO_ID) {
-                return createAccessibilityNodeInfo(accessibilityFocusedRow);
-            }
-            return null;
-        }
-    };
-
-    private boolean focusForTyping() {
-        requestFocus();
-        InputMethodManager imm = getContext().getSystemService(InputMethodManager.class);
-        if (imm != null) {
-            imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
-        }
-        return true;
-    }
-
-    /**
-     * The host of the virtual subtree.
-     *
-     * <p>Built with {@code obtain()} rather than {@code obtain(this)}: the latter
-     * hydrates the node from the real View hierarchy, and the first attempt at
-     * this sample returned a host whose only child was the prompt - the rows were
-     * added and then dropped.
-     */
-    private AccessibilityNodeInfo hostNode() {
-        AccessibilityNodeInfo node = AccessibilityNodeInfo.obtain();
-        node.setSource(this);
-        node.setPackageName(getContext().getPackageName());
-        node.setClassName(TerminalView.class.getName());
-        node.setEnabled(true);
-        node.setFocusable(true);
-        node.setVisibleToUser(true);
-        node.setBoundsInScreen(viewBounds());
-        for (int row = 0; row < screen.rows(); row++) {
-            if (!viewport.line(row).isEmpty()) {
-                node.addChild(this, FIRST_ROW_ID + row);
-            }
-        }
-        node.addChild(this, INPUT_NODE);
-        return node;
-    }
-
-    /** The same subtree, for a framework that asks the view rather than the provider. */
-    @Override
-    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
-        super.onInitializeAccessibilityNodeInfo(info);
-        info.setClassName(TerminalView.class.getName());
-        for (int row = 0; row < screen.rows(); row++) {
-            if (!viewport.line(row).isEmpty()) {
-                info.addChild(this, FIRST_ROW_ID + row);
-            }
-        }
-        info.addChild(this, INPUT_NODE);
-    }
-
-    private Rect viewBounds() {
-        int[] location = new int[2];
-        getLocationOnScreen(location);
-        return new Rect(location[0], location[1], location[0] + getWidth(),
-                location[1] + getHeight());
-    }
-
-    private AccessibilityNodeInfo rowNode(int row) {
-        AccessibilityNodeInfo node = AccessibilityNodeInfo.obtain();
-        node.setSource(this, FIRST_ROW_ID + row);
-        node.setParent(this);
-        node.setPackageName(getContext().getPackageName());
-        node.setClassName("android.widget.TextView");
-        node.setText(viewport.line(row));
-        node.setEnabled(true);
-        node.setFocusable(true);
-        node.setVisibleToUser(true);
-        node.setBoundsInScreen(rowBounds(row));
-        node.addAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
-        node.addAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS);
-        node.addAction(AccessibilityNodeInfo.ACTION_CLICK);
-        return node;
-    }
-
-    private AccessibilityNodeInfo inputNode() {
-        AccessibilityNodeInfo node = AccessibilityNodeInfo.obtain();
-        node.setSource(this, INPUT_NODE);
-        node.setParent(this);
-        node.setPackageName(getContext().getPackageName());
-        node.setClassName("android.widget.EditText");
-        node.setText(input.toString());
-        node.setHintText("terminal input");
-        node.setEditable(true);
-        node.setEnabled(true);
-        node.setFocusable(true);
-        node.setFocused(hasFocus());
-        node.setInputType(InputType.TYPE_CLASS_TEXT);
-        node.setVisibleToUser(true);
-        node.setBoundsInScreen(rowBounds(screen.rows()));
-        node.addAction(AccessibilityNodeInfo.ACTION_SET_TEXT);
-        node.addAction(AccessibilityNodeInfo.ACTION_CLICK);
-        node.addAction(AccessibilityNodeInfo.ACTION_FOCUS);
-        node.addAction(AccessibilityNodeInfo.ACTION_PASTE);
-        return node;
-    }
-
-    private Rect rowBounds(int row) {
-        int[] location = new int[2];
-        getLocationOnScreen(location);
-        return new Rect(location[0], location[1] + Math.round(row * cellHeight),
-                location[0] + getWidth(), location[1] + Math.round((row + 1) * cellHeight));
-    }
-
     @Override
     public AccessibilityNodeProvider getAccessibilityNodeProvider() {
-        return provider;
+        return accessibility.provider();
     }
 
     @Override
@@ -862,65 +603,23 @@ public final class TerminalView extends View {
         return TerminalView.class.getName();
     }
 
-    private void sendVirtualEvent(int type, int virtualViewId, String text) {
-        AccessibilityEvent event = AccessibilityEvent.obtain(type);
-        event.setPackageName(getContext().getPackageName());
-        event.setClassName(type == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED
-                ? "android.widget.TextView" : TerminalView.class.getName());
-        event.setSource(this, virtualViewId);
-        if (text != null) {
-            event.getText().add(text);
+    /** The same subtree, for a framework that asks the view rather than the provider. */
+    @Override
+    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+        super.onInitializeAccessibilityNodeInfo(info);
+        info.setClassName(TerminalView.class.getName());
+        accessibility.addRowsTo(info);
+    }
+
+    /** The row height the accessibility bounds are measured with. */
+    float cellHeight() {
+        return cellHeight;
+    }
+
+    /** Hands text to the running program, if one owns the screen. */
+    void programInput(String text) {
+        if (rawInput != null) {
+            rawInput.onInput(text);
         }
-        send(event);
-    }
-
-    private void notifyContentChanged() {
-        AccessibilityEvent event = AccessibilityEvent.obtain(
-                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
-        event.setPackageName(getContext().getPackageName());
-        event.setClassName(TerminalView.class.getName());
-        event.setSource(this);
-        event.setContentChangeTypes(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE);
-        send(event);
-    }
-
-    private void notifyTextChanged(String line) {
-        if (!announceOutput) {
-            return;
-        }
-        AccessibilityEvent event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_ANNOUNCEMENT);
-        event.setPackageName(getContext().getPackageName());
-        event.setClassName("android.widget.EditText");
-        event.setSource(this, INPUT_NODE);
-        event.getText().add(line);
-        send(event);
-    }
-
-    private void announce(String line) {
-        AccessibilityEvent event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_ANNOUNCEMENT);
-        event.setPackageName(getContext().getPackageName());
-        event.setClassName("android.widget.TextView");
-        event.setSource(this, HOST);
-        event.getText().add(line);
-        send(event);
-    }
-
-    /**
-     * Posts an event from this view's window; before attachment there is nobody
-     * to tell.
-     *
-     * <p>The {@link AccessibilityManager} check is not decoration:
-     * {@code requestSendAccessibilityEvent} throws {@code IllegalStateException:
-     * Accessibility off} when no service is enabled, which is a phone's normal
-     * state. The first version of this view crashed on its first screen of
-     * output for exactly that reason.
-     */
-    private void send(AccessibilityEvent event) {
-        ViewParent parent = getParent();
-        AccessibilityManager manager = getContext().getSystemService(AccessibilityManager.class);
-        if (parent == null || manager == null || !manager.isEnabled()) {
-            return;
-        }
-        parent.requestSendAccessibilityEvent(this, event);
     }
 }

@@ -16,7 +16,10 @@ comparison with xterm.js in a WebView, is
 |---|---|
 | `TerminalView` | the view: grid, rendering, `AccessibilityNodeProvider`, `InputConnection`, announcements |
 | `Screen` | the grid: the ECMA-48 subset a TUI uses — alternate screen, cursor addressing, erases, insert/delete, scroll regions, SGR foreground and background. Package-private; not part of the API |
+| `HistoryRow` | one row of primary-screen scrollback, with the colours of its cells. Package-private |
+| `AnsiPalette` | the 16-colour palette, the 256-colour cube and bold brightening. Package-private |
 | `Viewport` | the window over the history and the live grid: scroll offset, clamping, follow-at-bottom. Package-private |
+| `TerminalAccessibility` | the row and prompt nodes, their events, and the announcement timer. Package-private |
 
 `TerminalView` loads `terminal-mono.ttf` from the host app's assets when present —
 the same DejaVu Sans Mono the WebView page uses — and falls back to the system
@@ -66,8 +69,9 @@ at all.
 
 ## Tests
 
-`bash terminal/test.sh` compiles `Screen` and `Viewport` with `src/test` and runs
-them on the JVM. The screen checks cover cursor addressing, erases,
+`bash terminal/test.sh` compiles the grid, its history rows and colour tables,
+and the viewport with `src/test`, then runs them on the JVM. The screen checks
+cover cursor addressing, erases,
 insert/delete, scroll regions, primary-screen scrollback (limits, colours,
 resize, alternate-screen isolation and `ED 3`),
 the alternate screen, wrapping, SGR foreground and background colour (16, 256
