@@ -501,13 +501,12 @@ public final class SetupFlowTest {
             fail("the check did not answer within " + (POLL / 1000) + "s. " + diagnosis());
         }
 
-        // The answer has to end up on the page as well, and the terminal node is
-        // not a reliable thing to poll while it repaints. live-output.txt is
-        // written from the text the emulator is showing, so it is the proof that
-        // the page has it.
+        // The answer has to end up on the page as well. The terminal node is
+        // empty while the WebView repaints, and empty for good on a page whose
+        // terminal is not accessibility friendly, so the screen file the page
+        // writes from the same text is read when the node says nothing.
         String firstLine = text.trim().split("\n")[0].trim();
-        if (!firstLine.isEmpty()
-                && awaitFile(liveOutputFile(), value -> value.contains(firstLine), SHORT) == null) {
+        if (!firstLine.isEmpty() && !pageShows(firstLine, SHORT)) {
             fail("Termux answered but the page does not show it: " + diagnosis());
         }
         // The check has a page of its own, so leaving it is part of asking: the
@@ -622,6 +621,36 @@ public final class SetupFlowTest {
         }
         fail("the command streamed " + bytes + " bytes and then produced nothing for "
                 + (stall / 1000) + "s. " + diagnosis());
+    }
+
+    /**
+     * True when the page shows {@code wanted}.
+     *
+     * <p>Read from the terminal's accessibility node first. When that node is
+     * empty - it says nothing while the WebView repaints, and nothing at all on
+     * the opencode page, whose terminal is not accessibility friendly - the
+     * page's screen file is the evidence instead. The file is not authoritative
+     * on its own either: a page that is not in front does not write it, while
+     * it still publishes the finished screen to its node.
+     */
+    private boolean pageShows(String wanted, long budget) throws Exception {
+        if (terminalText().contains(wanted)) {
+            return true;
+        }
+        if (awaitFile(liveOutputFile(), value -> value.contains(wanted), budget) != null) {
+            return true;
+        }
+        return terminalText().contains(wanted);
+    }
+
+    /** What the terminal's accessibility node says; empty when it says nothing. */
+    private String terminalText() {
+        UiObject2 terminal = device.findObject(By.clazz("android.webkit.WebView"));
+        if (terminal == null) {
+            return "";
+        }
+        String text = terminal.getContentDescription();
+        return text == null ? "" : text;
     }
 
     /**
