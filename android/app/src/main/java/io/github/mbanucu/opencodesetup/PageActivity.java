@@ -67,6 +67,9 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     /** The emulator's size as published in the tail report. */
     private static final Pattern COLS = Pattern.compile("\"cols\":(\\d+)");
     private static final Pattern ROWS = Pattern.compile("\"rows\":(\\d+)");
+    /** The terminal's own size, which a frozen grid reports instead of its element's. */
+    private static final Pattern WIDTH = Pattern.compile("\"width\":(\\d+)");
+    private static final Pattern HEIGHT = Pattern.compile("\"height\":(\\d+)");
     private static final String TAG = "OpencodeSetup";
 
     protected LinearLayout column;
@@ -98,7 +101,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private boolean inputEnabled;
     private volatile boolean streamed;
     /** True while a command runs: accessibility updates wait until it ends. */
-    private boolean commandRunning;
+    private volatile boolean commandRunning;
     // A command waiting for the terminal to report its size: run as soon as that
     // size arrives, or unconditionally after a few seconds.
     private Runnable pendingSend;
@@ -106,6 +109,16 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private final List<Button> actionButtons = new ArrayList<>();
     private final List<View> collapseOnRun = new ArrayList<>();
     private final LiveStream liveStream = new LiveStream();
+    /**
+     * The second loopback port: {@code cols rows} lines Termux turns into a
+     * resize of the running command's pseudo terminal. Nothing comes back on it.
+     */
+    private final LiveStream control = new LiveStream();
+    /** The size the running command's PTY has, which is what it draws to. */
+    private volatile int ptyColumns;
+    private volatile int ptyRows;
+    /** The window the frozen grid was last re-fitted for. */
+    private volatile String lastWindow;
     private volatile String screen = "";
     private final Handler ui = new Handler(Looper.getMainLooper());
     private Runnable pending;
@@ -278,6 +291,12 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             return;
         }
         ViewGroup.LayoutParams params = frame.getLayoutParams();
+        if (params instanceof LinearLayout.LayoutParams) {
+            // A weighted frame is given whatever space is left, so a height on its
+            // own would be measured and then ignored; pinning has to take the
+            // weight away first, or nothing moves and no resize is reported.
+            ((LinearLayout.LayoutParams) params).weight = 0f;
+        }
         params.height = Math.max(dp(120),
                 Math.round(getResources().getDisplayMetrics().heightPixels * fraction));
         frame.setLayoutParams(params);
@@ -827,8 +846,13 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             write(chunk);
         });
         try {
+            int controlPort = control.open(chunk -> { });
             TermuxCommands.send(this, command, label, description, port, columns, rows,
-                    inputEnabled);
+                    inputEnabled, controlPort);
+            // The PTY was given this grid; anything else is a resize to follow.
+            ptyColumns = columns;
+            ptyRows = rows;
+            lastWindow = null;
             // The PTY has this grid now; a window resize (the keyboard opening,
             // for one) must not reflow it underneath the running program.
             script("lockFit()");
@@ -1007,6 +1031,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
 
     private void stopListening() {
         liveStream.close();
+        control.close();
     }
 
     /**
@@ -1051,29 +1076,75 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
          * The grid and the window around it, sent the moment either moves.
          *
          * <p>These numbers are what the next command is sized to, so they are
-         * recorded even while a command runs; {@code frozen} in the report says
-         * whether the grid is still the one the running command was given, which
-         * it keeps until it exits - Termux cannot resize a PTY it already
-         * started, so following the window there is the app's job, not the
-         * terminal's.
+         * recorded even while a command runs. {@code frozen} in the report says
+         * the grid is still the one the running command was given; a window that
+         * moved under it is what makes the terminal re-fit, and the pseudo
+         * terminal is then told the new size, so the program redraws to fit
+         * instead of drawing into rows nobody can see.
          */
         @JavascriptInterface
         public void onResize(String json) {
             java.util.regex.Matcher cols = COLS.matcher(json);
             java.util.regex.Matcher rows = ROWS.matcher(json);
+            int reportedColumns = -1;
+            int reportedRows = -1;
             if (cols.find() && rows.find()) {
-                int reportedColumns = Integer.parseInt(cols.group(1));
-                int reportedRows = Integer.parseInt(rows.group(1));
                 // The same guard the screen report uses: before its first fit
                 // the emulator is a couple of cells wide, and a command sent at
                 // that width is worse than one sent at the size before it.
-                if (reportedColumns >= 20 && reportedRows >= 5) {
+                if (Integer.parseInt(cols.group(1)) >= 20
+                        && Integer.parseInt(rows.group(1)) >= 5) {
+                    reportedColumns = Integer.parseInt(cols.group(1));
+                    reportedRows = Integer.parseInt(rows.group(1));
                     columns = reportedColumns;
                     // Qualified: "rows" above is the matcher, not the field.
                     PageActivity.this.rows = reportedRows;
                 }
             }
             Diagnostics.log(PageActivity.this, "resize:" + json);
+            if (reportedColumns < 0 || !json.contains("\"frozen\":true")) {
+                return;
+            }
+            String window = windowOf(json);
+            if (!window.equals(lastWindow)) {
+                // The window moved and the grid, being the running command's, did
+                // not: fit it to the cells that are visible now, and the report
+                // that follows carries the size the PTY has to take.
+                lastWindow = window;
+                if (commandRunning) {
+                    ui.post(() -> script("resizePty()"));
+                }
+                return;
+            }
+            if (commandRunning && (reportedColumns != ptyColumns || reportedRows != ptyRows)) {
+                resizePty(reportedColumns, reportedRows);
+            }
+        }
+
+        /** The element's size from a resize report, for spotting a moved window. */
+        private String windowOf(String json) {
+            java.util.regex.Matcher width = WIDTH.matcher(json);
+            java.util.regex.Matcher height = HEIGHT.matcher(json);
+            return width.find() && height.find()
+                    ? width.group(1) + "x" + height.group(1) : json;
+        }
+
+        /**
+         * Tells Termux the size the pseudo terminal has to take now.
+         *
+         * <p>The PTY was made by {@code script}, so this app cannot reach it; a
+         * watcher on Termux's side does the resize, and the kernel interrupts the
+         * program with SIGWINCH - the same thing a terminal does when its
+         * keyboard opens and the view gets shorter.
+         */
+        private void resizePty(int cols, int rows) {
+            if (cols < 20 || rows < 5 || !control.connected()) {
+                return;
+            }
+            ptyColumns = cols;
+            ptyRows = rows;
+            control.send((cols + " " + rows + "\n").getBytes(StandardCharsets.UTF_8));
+            Diagnostics.log(PageActivity.this, "pty-resize:" + cols + "x" + rows);
         }
 
         /** A keystroke from the page's keyboard, on its way to the PTY. */

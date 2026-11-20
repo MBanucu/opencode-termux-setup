@@ -74,12 +74,44 @@ the moment the grid or the element around it moves, reporting
 `{"cols","rows","width","height","frozen"}` into `events.log`; `PtySizeTest`
 asserts the announced grid is the one the PTY was given.
 
-`frozen` is the part worth knowing: Termux cannot resize a PTY that already
-started, so the page holds the grid and shifts it up by the height the window
-lost, keeping the newest rows (a TUI's composer) on screen. Do not pin the
-terminal's height from the Android side instead: the element then never changes
-size, so no event is sent and the app is back to guessing. That pin lived in
-`PageActivity` for one commit and is what this replaced.
+`frozen` is the part worth knowing: a running command owns its grid, and the
+window around it can move under it - the keyboard opening is enough. The page
+re-fits the grid when asked and the app hands the same size to the PTY, so the
+program redraws to fit instead of drawing into rows nobody can see. Do not pin
+the terminal's height from the Android side instead: the element then never
+changes size, so no event is sent and the app is back to guessing. That pin lived
+in `PageActivity` for one commit and is what this replaced.
+
+## Resizing a PTY this app does not own
+
+A terminal resizes a PTY with `ioctl(TIOCSWINSZ)` on the master, and the kernel
+sends SIGWINCH to the foreground program; that is what Termux does when the
+keyboard opens and its view gets shorter. This app cannot: `script` made the PTY,
+so the master descriptor is Termux's. So the app opens a second loopback port
+(`LiveStream control`) and the wrapper `TermuxCommands.wrap` starts a background
+`read` loop that sets the size on the slave device with
+`stty -F <tty> cols/rows`, falling back to `stty ... < <tty>`. The device name is
+written by the command itself to `$HOME/.opencode-setup/pty`, because only the
+process inside the PTY can ask `tty`. The loop is killed from a `trap ... EXIT`,
+so it cannot outlive the command and hold the app's socket open.
+
+`PtyResizeTest` is the only honest witness: the command prints `stty size` once a
+second, the test shortens the page under it, and the rows the program prints must
+be the rows the app wrote to its control port. A page that re-fits its own grid
+passes a log-only check and fails this one.
+
+Three things that cost runs here:
+
+- A test's second `startActivity` for a page already on top does not reach it on
+  this device: no new activity, no `onNewIntent`, nothing in the ATMS log. The
+  resize hook is a package-scoped broadcast (`TerminalActivity.ACTION_RESIZE`)
+  for that reason, since the test code runs in the page's own process.
+- `pinTerminalHeight` has to clear the frame's layout weight before setting a
+  height. A weighted frame is given whatever is left, so the height was measured
+  and then ignored, the window never moved, and no resize was ever reported.
+- `test/android-e2e.sh` installs the APK under `android/app/build/`; it does not
+  build it. Run `bash test/local-build.sh --skip-tests` first, or you are testing
+  the previous build while the source you just changed looks correct.
 
 ## A failing suite is usually leftover device state
 

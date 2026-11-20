@@ -82,10 +82,11 @@
    * happens the terminal gives up one row, which was spare space anyway - better
    * a blank line fewer than a clipped one.
    */
-  function keepTailVisible() {
+  function keepTailVisible(refit) {
     // A frozen grid is the one the PTY has; dropping a row now would take a row
-    // away from the program without telling it.
-    if (frozen) {
+    // away from the program without telling it. A refit is the exception: the
+    // app hands the new size to the PTY, so the program learns about the row.
+    if (frozen && !refit) {
       return;
     }
     var area = document.getElementById('screen').getBoundingClientRect();
@@ -183,7 +184,8 @@
    * opening, a rotation and the window regaining height all change what the next
    * command should be sized to, and while a command runs the app decides from
    * {@code frozen} whether these numbers are the grid the PTY has or only the
-   * window around it - Termux cannot resize a PTY it has already started.
+   * window around it; the app re-fits a frozen grid and hands the result to the
+   * PTY, which a program on the other side sees as a resize.
    */
   function reportResize() {
     if (!window.AndroidBridge) {
@@ -223,6 +225,25 @@
     var hidden = rows.getBoundingClientRect().height - area.height;
     box.style.transform = hidden > 1 ? 'translateY(-' + Math.round(hidden) + 'px)' : '';
   }
+
+  /**
+   * Fits the grid the running command was given to the window as it is now.
+   *
+   * <p>Called when the window moved under a frozen grid. The emulator takes the
+   * cells that are visible now, and the app sends the same numbers to the PTY, so
+   * a full screen program is told the screen changed and redraws to fit, instead
+   * of drawing into rows that are off the bottom. The grid stays frozen: it is
+   * still the one the command owns.
+   */
+  window.resizePty = function () {
+    try {
+      fit.fit();
+      term.scrollToBottom();
+      keepTailVisible(true);
+    } catch (e) { /* hidden or not laid out yet */ }
+    alignFrozenGrid();
+    reportResize();
+  };
 
   // The window's own resize event is not enough: a frozen grid ignores it, and
   // the element can be given a new size - the keyboard shortening the page -

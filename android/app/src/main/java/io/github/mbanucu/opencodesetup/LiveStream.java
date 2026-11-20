@@ -76,6 +76,14 @@ final class LiveStream {
         }
     }
 
+    /**
+     * Whether the command has connected back yet. A write before that is lost,
+     * so a caller that must not lose one checks first.
+     */
+    boolean connected() {
+        return connection != null;
+    }
+
     /** Closes the port; a pump blocked in {@code accept} or {@code read} ends. */
     void close() {
         ServerSocket open = socket;

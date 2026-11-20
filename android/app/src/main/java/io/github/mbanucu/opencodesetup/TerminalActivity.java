@@ -1,7 +1,10 @@
 package io.github.mbanucu.opencodesetup;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
 import android.os.Bundle;
 
 /**
@@ -22,6 +25,41 @@ public final class TerminalActivity extends PageActivity {
 
     /** Raw PTY bytes for the rendering tests; when set, nothing is run. */
     static final String EXTRA_PROBE = "pty_probe_b64";
+
+    /**
+     * Shortens the window under a running command, carrying a
+     * {@code resize_fraction} extra.
+     *
+     * <p>A broadcast rather than another intent: a page that is already on top
+     * does not reliably get a second intent on this device - the launch makes no
+     * second activity and no {@code onNewIntent} either - and what a resize test
+     * needs is the page that is running the command, not a page that replaces it.
+     */
+    public static final String ACTION_RESIZE = "io.github.mbanucu.opencodesetup.action.RESIZE";
+
+    /** Whether {@link #resizeReceiver} is still registered, so closing cannot throw. */
+    private boolean listeningForResize;
+
+    /**
+     * Moves the window under the running command and leaves the command alone.
+     *
+     * <p>Nothing is abandoned and nothing is thawed: what is being watched is what
+     * the command does when the terminal it draws to changes size. The frame
+     * shrinks, the page re-fits the grid it froze, and the app writes the new size
+     * to the PTY.
+     */
+    private final BroadcastReceiver resizeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context from, Intent intent) {
+            float fraction = intent == null ? 0f : intent.getFloatExtra("resize_fraction", 0f);
+            if (fraction <= 0f) {
+                return;
+            }
+            Diagnostics.log(TerminalActivity.this, "reshape:" + fraction);
+            getIntent().putExtra("terminal_fraction", fraction);
+            pinTerminalHeight();
+        }
+    };
 
     /** Opens a page that runs {@code command} as soon as it appears. */
     static void start(Context from, String command, String label, String description,
@@ -119,6 +157,13 @@ public final class TerminalActivity extends PageActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        IntentFilter resizes = new IntentFilter(ACTION_RESIZE);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(resizeReceiver, resizes, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(resizeReceiver, resizes);
+        }
+        listeningForResize = true;
         Intent opener = getIntent();
         String command = opener == null ? null : opener.getStringExtra(EXTRA_COMMAND);
         String probe = opener == null ? null : opener.getStringExtra(EXTRA_PROBE);
@@ -149,5 +194,14 @@ public final class TerminalActivity extends PageActivity {
         runCommand(command,
                 String.valueOf(opener.getStringExtra(EXTRA_LABEL)),
                 String.valueOf(opener.getStringExtra(EXTRA_DESCRIPTION)));
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (listeningForResize) {
+            unregisterReceiver(resizeReceiver);
+            listeningForResize = false;
+        }
+        super.onDestroy();
     }
 }

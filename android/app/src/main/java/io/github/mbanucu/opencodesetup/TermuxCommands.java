@@ -27,6 +27,8 @@ final class TermuxCommands {
     private static final String ACTION = "com.termux.RUN_COMMAND";
     private static final String BASH = "/data/data/com.termux/files/usr/bin/bash";
     private static final String HOME = "/data/data/com.termux/files/home";
+    /** Where the command writes the pseudo terminal it was given, for the watcher. */
+    private static final String TTY_FILE = HOME + "/.opencode-setup/pty";
     private static final String TAG = "OpencodeSetup";
 
     private TermuxCommands() {
@@ -52,6 +54,17 @@ final class TermuxCommands {
      */
     static void send(Context context, String command, String label, String description,
             int port, int columns, int rows, boolean input) {
+        send(context, command, label, description, port, columns, rows, input, 0);
+    }
+
+    /**
+     * The same, with a second loopback port for resizing the pseudo terminal
+     * while the command runs: the page moves, the size is written to that port,
+     * and the program is interrupted with SIGWINCH the way a terminal window's
+     * own resize would interrupt it.
+     */
+    static void send(Context context, String command, String label, String description,
+            int port, int columns, int rows, boolean input, int controlPort) {
         PendingIntent result = PendingIntent.getBroadcast(context, 0,
                 new Intent(RunCommandReceiver.ACTION_RESULT).setPackage(context.getPackageName()),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
@@ -61,7 +74,7 @@ final class TermuxCommands {
         intent.setAction(ACTION);
         intent.putExtra("com.termux.RUN_COMMAND_PATH", BASH);
         intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS",
-                new String[] {"-lc", wrap(command, port, columns, rows, input)});
+                new String[] {"-lc", wrap(command, port, columns, rows, input, controlPort)});
         intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", HOME);
         intent.putExtra("com.termux.RUN_COMMAND_RUNNER", "app-shell");
         intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
@@ -88,12 +101,19 @@ final class TermuxCommands {
      * at {@code script}'s 80x24 default, a progress line that redraws itself with
      * a carriage return wraps on a phone-width terminal, so each redraw lands on
      * a row of its own and the fragment above it is left behind.
+     *
+     * <p>It is resized again whenever the page moves, through the watcher
+     * {@link #watch} starts: the PTY belongs to {@code script}, so nothing in
+     * this app can reach it, but a process on Termux's side can.
      */
     private static String wrap(String command, int port, int columns, int rows,
-            boolean input) {
+            boolean input, int controlPort) {
         String quoted = "'" + command.replace("'", "'\\''") + "'";
-        String sized = columns > 0 && rows > 0
-                ? "stty cols " + columns + " rows " + rows + " 2>/dev/null; " : "";
+        // The $ is escaped for the wrapping shell: this must reach the command
+        // inside the pseudo terminal, where "$(tty)" finally names its device.
+        String sized = "printf '%s' \\\"\\$(tty)\\\" > " + TTY_FILE + " 2>/dev/null; "
+                + (columns > 0 && rows > 0
+                        ? "stty cols " + columns + " rows " + rows + " 2>/dev/null; " : "");
         String run = "if command -v script >/dev/null 2>&1; then "
                 + "TERM=xterm-256color script -q -f -e -c \"" + sized
                 + "bash -lc " + quoted + "\" /dev/null; "
@@ -111,7 +131,39 @@ final class TermuxCommands {
                 : "exec 3<>/dev/tcp/127.0.0.1/" + port + " 2>/dev/null || exec 3>/dev/null; ";
         String feed = input ? " <&3" : "";
         return open
+                + watch(controlPort)
                 + "{ " + run + " ; }" + feed + " 2>&1 | stdbuf -oL tee >(cat >&3); "
                 + "exit ${PIPESTATUS[0]}";
+    }
+
+    /**
+     * A background reader that resizes the pseudo terminal the command runs in.
+     *
+     * <p>{@code script} made the PTY, so its master descriptor is Termux's and
+     * not this app's: the only way to change the size is from inside Termux.
+     * This loop reads {@code cols rows} lines from a second loopback port and
+     * sets them on the slave device, which is the same window-size change a
+     * terminal does when the keyboard opens - the kernel then sends SIGWINCH to
+     * the foreground program, and a full screen program redraws to fit.
+     *
+     * <p>The device name is written by the command itself, as soon as it has a
+     * terminal: only the process inside the PTY can ask which {@code /dev/pts}
+     * it got. The watcher is killed when the wrapper exits, so it cannot outlive
+     * the command and hold the app's socket open.
+     */
+    private static String watch(int controlPort) {
+        if (controlPort <= 0) {
+            return "";
+        }
+        return "mkdir -p " + HOME + "/.opencode-setup 2>/dev/null; "
+                + "exec 4<>/dev/tcp/127.0.0.1/" + controlPort + " 2>/dev/null; "
+                + "( while IFS=' ' read -r wc wr <&4; do "
+                + "p=$(cat " + TTY_FILE + " 2>/dev/null); "
+                + "{ [ -n \"$p\" ] && [ -n \"$wr\" ]; } || continue; "
+                // -F where stty has it, the device as stdin where it does not.
+                + "stty -F \"$p\" cols \"$wc\" rows \"$wr\" 2>/dev/null "
+                + "|| stty cols \"$wc\" rows \"$wr\" < \"$p\" 2>/dev/null; "
+                + "done ) 2>/dev/null & "
+                + "watch=$!; trap 'kill $watch 2>/dev/null' EXIT; ";
     }
 }

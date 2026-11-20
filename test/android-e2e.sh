@@ -278,6 +278,11 @@ echo "== terminal behaviour (heights, PTY size, rendering) =="
 #     formatted to the PTY's width. At script's 80x24 default it wraps on a
 #     phone terminal and leaves the previous fragment behind, so the app makes
 #     the PTY the emulator's own columns and reports both numbers in events.log.
+#   resize - the PTY follows the window while a command runs: a command that
+#     prints `stty size` once a second has the page shortened under it, and the
+#     size it prints afterwards must be the one the app wrote to its control
+#     port. Re-fitting the page's own grid is not enough; the program has to
+#     see it.
 #   rendering - raw bytes are written into the real terminal page and the screen
 #     it publishes is asserted: a carriage return must overwrite, SGR must not
 #     print, ESC[2K must erase, a backspace must step back, and a line longer
@@ -285,9 +290,9 @@ echo "== terminal behaviour (heights, PTY size, rendering) =="
 #     whole screen, scrolling past the screen, and a carriage return after a
 #     wrap. One case per class method, ten in all.
 terminal_log=$(mktemp)
-run_phase "$pkg.TerminalHeightTest,$pkg.PtySizeTest,$pkg.PtyRenderingTest" \
+run_phase "$pkg.TerminalHeightTest,$pkg.PtySizeTest,$pkg.PtyRenderingTest,$pkg.PtyResizeTest" \
     "$terminal_log" "terminal behaviour"
-grep -q 'OK (12 tests)' "$terminal_log" || { echo "terminal behaviour tests FAILED" >&2; exit 1; }
+grep -q 'OK (13 tests)' "$terminal_log" || { echo "terminal behaviour tests FAILED" >&2; exit 1; }
 
 echo "== denial path (permission revoked, separate run) =="
 # Revoking a dangerous permission kills the target process, hence a second run.
