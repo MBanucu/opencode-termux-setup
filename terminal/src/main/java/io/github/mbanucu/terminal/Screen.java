@@ -24,6 +24,7 @@ final class Screen implements EscapeParser.Handler {
     private final EscapeParser parser = new EscapeParser(this);
     /** Where answers to a program's queries go; null means stay quiet. */
     private ReplySink replySink;
+    private final CsiCommands commands = new CsiCommands(this);
     private char[][] main;
     private char[][] alt;
     /** Whether each row of the primary buffer continues on the next row. */
@@ -359,7 +360,7 @@ final class Screen implements EscapeParser.Handler {
         if (reportIdentity(body, last)) {
             return;
         }
-        dispatch(parts, last);
+        commands.dispatch(parts, last);
         wrapPending = false;
     }
 
@@ -423,108 +424,10 @@ final class Screen implements EscapeParser.Handler {
         }
     }
 
-    /** The non-private sequences: where text goes, and what is erased. */
-    private void dispatch(String[] parts, char last) {
-        switch (last) {
-            case 'H':
-            case 'f':
-                moveTo(number(parts, 0, 1), number(parts, 1, 1));
-                break;
-            case 'A':
-                cursorRow -= Math.max(1, number(parts, 0, 1));
-                clamp();
-                break;
-            case 'B':
-                cursorRow += Math.max(1, number(parts, 0, 1));
-                clamp();
-                break;
-            case 'C':
-                cursorCol += Math.max(1, number(parts, 0, 1));
-                clamp();
-                break;
-            case 'D':
-                cursorCol -= Math.max(1, number(parts, 0, 1));
-                clamp();
-                break;
-            case 'E':
-                cursorRow += Math.max(1, number(parts, 0, 1));
-                cursorCol = 0;
-                clamp();
-                break;
-            case 'F':
-                cursorRow -= Math.max(1, number(parts, 0, 1));
-                cursorCol = 0;
-                clamp();
-                break;
-            case 'G':
-                cursorCol = Math.max(1, number(parts, 0, 1)) - 1;
-                clamp();
-                break;
-            case 'd':
-                cursorRow = Math.max(1, number(parts, 0, 1)) - 1;
-                clamp();
-                break;
-            case 'J':
-                eraseScreen(number(parts, 0, 0));
-                break;
-            case 'K':
-                eraseLine(number(parts, 0, 0));
-                break;
-            case 'L':
-                insertLines(Math.max(1, number(parts, 0, 1)));
-                break;
-            case 'M':
-                deleteLines(Math.max(1, number(parts, 0, 1)));
-                break;
-            case 'P':
-                deleteChars(Math.max(1, number(parts, 0, 1)));
-                break;
-            case '@':
-                insertChars(Math.max(1, number(parts, 0, 1)));
-                break;
-            case 'X':
-                eraseChars(Math.max(1, number(parts, 0, 1)));
-                break;
-            case 'b':
-                repeat(Math.max(1, number(parts, 0, 1)));
-                break;
-            case 'S':
-                scrollUp(Math.max(1, number(parts, 0, 1)));
-                break;
-            case 'T':
-                scrollDown(Math.max(1, number(parts, 0, 1)));
-                break;
-            case 'r':
-                scrollTop = Math.max(0, number(parts, 0, 1) - 1);
-                scrollBottom = Math.min(rows - 1, number(parts, 1, rows) - 1);
-                moveTo(1, 1);
-                break;
-            case 's':
-                savedRow = cursorRow;
-                savedCol = cursorCol;
-                break;
-            case 'u':
-                cursorRow = savedRow;
-                cursorCol = savedCol;
-                clamp();
-                break;
-            case 'm':
-                sgr.apply(parts);
-                break;
-            case 'n':
-                deviceStatus(parts);
-                break;
-            case 'q':
-                cursorStyle(parts);
-                break;
-            default:
-                // h/l (modes other than the alternate screen): nothing to place.
-                break;
-        }
-    }
+
 
     /** DSR 5 is "are you OK"; DSR 6 is the cursor position report. */
-    private void deviceStatus(String[] parts) {
+    void deviceStatus(String[] parts) {
         int request = number(parts, 0, 0);
         if (request == 5) {
             reply("\u001b[0n");
@@ -585,10 +488,77 @@ final class Screen implements EscapeParser.Handler {
         return new int[rows][cols];
     }
 
-    private void moveTo(int row, int col) {
+    void moveTo(int row, int col) {
         cursorRow = Math.max(0, Math.min(rows - 1, row - 1));
         cursorCol = Math.max(0, Math.min(cols - 1, col - 1));
         wrapPending = false;
+    }
+
+    void moveUp(int lines) {
+        cursorRow -= Math.max(1, lines);
+        clamp();
+    }
+
+    void moveDown(int lines) {
+        cursorRow += Math.max(1, lines);
+        clamp();
+    }
+
+    void moveRight(int columns) {
+        cursorCol += Math.max(1, columns);
+        clamp();
+    }
+
+    void moveLeft(int columns) {
+        cursorCol -= Math.max(1, columns);
+        clamp();
+    }
+
+    void nextLine(int lines) {
+        cursorRow += Math.max(1, lines);
+        cursorCol = 0;
+        clamp();
+    }
+
+    void previousLine(int lines) {
+        cursorRow -= Math.max(1, lines);
+        cursorCol = 0;
+        clamp();
+    }
+
+    void setColumn(int column) {
+        cursorCol = Math.max(1, column) - 1;
+        clamp();
+    }
+
+    void setRow(int row) {
+        cursorRow = Math.max(1, row) - 1;
+        clamp();
+    }
+
+    void setScrollRegion(int top, int bottom) {
+        scrollTop = Math.max(0, top - 1);
+        scrollBottom = Math.min(rows - 1, bottom - 1);
+        moveTo(1, 1);
+    }
+
+    void saveCursor() {
+        savedRow = cursorRow;
+        savedCol = cursorCol;
+    }
+
+    void restoreCursor() {
+        cursorRow = savedRow;
+        cursorCol = savedCol;
+        clamp();
+    }
+
+    void applySgr(String[] parts) {
+        sgr.apply(parts);
+    }
+
+    void applyCursorStyle(String[] parts) {
+        cursorStyle(parts);
     }
 
     private void clamp() {
@@ -626,7 +596,7 @@ final class Screen implements EscapeParser.Handler {
      * background by writing a space in that background, and xterm-256color
      * advertises REP, so ncurses writes a box's fill as one space and a REP.
      */
-    private void repeat(int count) {
+    void repeat(int count) {
         for (int i = 0; i < count; i++) {
             put(lastChar);
         }
@@ -641,7 +611,7 @@ final class Screen implements EscapeParser.Handler {
         }
     }
 
-    private void scrollUp(int count) {
+    void scrollUp(int count) {
         for (int i = 0; i < count; i++) {
             // Only a full-screen scroll of the primary buffer is scrollback: a
             // program scrolling a region owns those rows, and the alternate
@@ -668,7 +638,7 @@ final class Screen implements EscapeParser.Handler {
                 backgrounds[scrollTop].clone(), wrapped[scrollTop]));
     }
 
-    private void scrollDown(int count) {
+    void scrollDown(int count) {
         for (int i = 0; i < count; i++) {
             for (int row = scrollBottom; row > scrollTop; row--) {
                 System.arraycopy(cells[row - 1], 0, cells[row], 0, cols);
@@ -688,7 +658,7 @@ final class Screen implements EscapeParser.Handler {
      * erase"), which is what ncurses relies on: a box's fill is written as one
      * space and an ECH to the end of the line, not as a run of spaces.
      */
-    private void eraseScreen(int mode) {
+    void eraseScreen(int mode) {
         if (mode == 3) {
             // ED 3 is xterm's "clear scrollback", not "clear screen": the
             // visible grid stays, which is what a program that clears its
@@ -732,7 +702,7 @@ final class Screen implements EscapeParser.Handler {
         }
     }
 
-    private void eraseLine(int mode) {
+    void eraseLine(int mode) {
         if (mode == 2) {
             Arrays.fill(cells[cursorRow], ' ');
             Arrays.fill(colours[cursorRow], 0);
@@ -749,14 +719,14 @@ final class Screen implements EscapeParser.Handler {
         }
     }
 
-    private void eraseChars(int count) {
+    void eraseChars(int count) {
         int end = Math.min(cols, cursorCol + count);
         Arrays.fill(cells[cursorRow], cursorCol, end, ' ');
         Arrays.fill(colours[cursorRow], cursorCol, end, 0);
         Arrays.fill(backgrounds[cursorRow], cursorCol, end, sgr.background());
     }
 
-    private void deleteChars(int count) {
+    void deleteChars(int count) {
         char[] row = cells[cursorRow];
         int end = Math.min(cols, cursorCol + count);
         System.arraycopy(row, end, row, cursorCol, cols - end);
@@ -768,7 +738,7 @@ final class Screen implements EscapeParser.Handler {
                 sgr.background());
     }
 
-    private void insertChars(int count) {
+    void insertChars(int count) {
         char[] row = cells[cursorRow];
         int shift = Math.min(count, cols - cursorCol);
         System.arraycopy(row, cursorCol, row, cursorCol + shift, cols - cursorCol - shift);
@@ -781,7 +751,7 @@ final class Screen implements EscapeParser.Handler {
         Arrays.fill(backgrounds[cursorRow], cursorCol, cursorCol + shift, sgr.background());
     }
 
-    private void insertLines(int count) {
+    void insertLines(int count) {
         for (int i = 0; i < count; i++) {
             for (int row = scrollBottom; row > cursorRow; row--) {
                 System.arraycopy(cells[row - 1], 0, cells[row], 0, cols);
@@ -796,7 +766,7 @@ final class Screen implements EscapeParser.Handler {
         }
     }
 
-    private void deleteLines(int count) {
+    void deleteLines(int count) {
         for (int i = 0; i < count; i++) {
             for (int row = cursorRow; row < scrollBottom; row++) {
                 System.arraycopy(cells[row + 1], 0, cells[row], 0, cols);
