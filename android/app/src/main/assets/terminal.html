@@ -56,6 +56,11 @@
     fontFamily: "'Terminal Mono', monospace",
     fontSize: fontPx > 0 ? fontPx : 13,
     cursorBlink: true,
+    // The default inactive cursor is an outline, so a page nobody has tapped
+    // draws a hollow box around the character under the cursor - on the opencode
+    // entry page that is the "A" of the composer's placeholder, which reads as a
+    // broken glyph. A block is what Termux draws, focused or not.
+    cursorInactiveStyle: 'block',
     // The bundle Termux returns uses "\n" where the PTY used "\r\n"; a real
     // terminal keeps the column on a line feed, which indented "exit code 0".
     convertEol: true,
