@@ -41,12 +41,21 @@ final class TestSupport {
         }
     }
 
-    /** Prints the suite's result and fails the process when a check did. */
+    /**
+     * Prints the suite's result and fails the process when a check did.
+     *
+     * <p>The counters start again afterwards: SuiteRunner runs every suite in one
+     * JVM and they share this class, so a cumulative count would make each suite
+     * report the checks before it as its own.
+     */
     static void report(String suite) {
-        System.out.println(failed == 0
-                ? "PASS " + passed + " " + suite
-                : "FAIL " + failed + " of " + (passed + failed) + " " + suite);
-        if (failed != 0) {
+        boolean failedAny = failed != 0;
+        System.out.println(failedAny
+                ? "FAIL " + failed + " of " + (passed + failed) + " " + suite
+                : "PASS " + passed + " " + suite);
+        passed = 0;
+        failed = 0;
+        if (failedAny) {
             System.exit(1);
         }
     }

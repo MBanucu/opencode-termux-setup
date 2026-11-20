@@ -99,7 +99,9 @@ and the viewport with `src/test`, then runs them on the JVM. It discovers the
 sources and every `*Test.java` instead of naming them, so a new suite runs
 without being registered; `test/local-build.sh` runs it next to the app suite and
 `.github/workflows/android.yml` runs it on every push that touches `terminal/`.
-The screen checks
+Compiling happens only when a source or the file list changed, and all suites run
+in one JVM through `SuiteRunner`, which prints the same per-test `timing:` lines
+the app's `TestTimings` does. The screen checks
 cover cursor addressing, erases,
 insert/delete, scroll regions, primary-screen scrollback (limits, colours,
 resize, alternate-screen isolation and `ED 3`),
