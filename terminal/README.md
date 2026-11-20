@@ -16,6 +16,7 @@ comparison with xterm.js in a WebView, is
 |---|---|
 | `TerminalView` | the view: grid, rendering, `AccessibilityNodeProvider`, `InputConnection`, announcements |
 | `Screen` | the grid: the ECMA-48 subset a TUI uses — alternate screen, cursor addressing, erases, insert/delete, scroll regions, SGR foreground and background. Package-private; not part of the API |
+| `Viewport` | the window over the history and the live grid: scroll offset, clamping, follow-at-bottom. Package-private |
 
 `TerminalView` loads `terminal-mono.ttf` from the host app's assets when present —
 the same DejaVu Sans Mono the WebView page uses — and falls back to the system
@@ -34,6 +35,12 @@ terminal.feed(chunkFromThePty);        // often; a partial escape is buffered
 in half is held until it is complete. `screenText()` returns the primary screen's
 history above the visible grid; on the alternate screen it returns only that
 screen, because a full-screen program owns the display.
+
+Dragging the view scrolls back through the primary screen's history, and a fling
+carries on at finger speed. While scrolled back, output that pushes rows into
+history keeps the row being read in place rather than sliding it away; a view at
+the bottom follows new output, and typing returns it to the bottom. The caret is
+not drawn while scrolled back, because its row is below the view.
 
 On the alternate screen the caret is the view's to draw as well: a block at the
 grid's cursor, hidden while the program says DEC mode 25 is off, and blinking when
@@ -59,18 +66,22 @@ at all.
 
 ## Tests
 
-`bash terminal/test.sh` compiles `Screen` with `src/test` and runs it on the JVM:
-cursor addressing, erases, insert/delete, scroll regions, primary-screen
-scrollback (limits, colours, resize, alternate-screen isolation and `ED 3`),
+`bash terminal/test.sh` compiles `Screen` and `Viewport` with `src/test` and runs
+them on the JVM. The screen checks cover cursor addressing, erases,
+insert/delete, scroll regions, primary-screen scrollback (limits, colours,
+resize, alternate-screen isolation and `ED 3`),
 the alternate screen, wrapping, SGR foreground and background colour (16, 256
 and truecolor, and `1`
 brightening a foreground), the
 caret (DEC mode 25, synchronized updates, DECSCUSR style and DEC mode 12 blinking),
 and the sequences that must print nothing (OSC titles and DCS payloads, cursor
 visibility),
-including escapes split across two `feed` calls. It needs no device,
-no Gradle and no test framework, because the grid is plain Java. The view needs a
-device and is covered by `samples/e2e.sh`.
+including escapes split across two `feed` calls. The viewport checks cover
+scrolling into history, clamping at both ends, output while scrolled back not
+moving the row being read, the alternate screen resetting the view, `ED 3`, and
+a 3000-line history. They need no device, no Gradle and no test framework,
+because the grid and the viewport are plain Java. The view itself needs a device
+and is covered by `samples/e2e.sh`.
 
 ## What it is not
 

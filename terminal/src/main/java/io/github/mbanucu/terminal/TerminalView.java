@@ -12,6 +12,7 @@ import android.text.InputType;
 import android.text.SpannableStringBuilder;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewParent;
 import android.view.accessibility.AccessibilityEvent;
@@ -22,6 +23,7 @@ import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.Scroller;
 
 /**
  * A terminal drawn by this app, with the shape a screen reader needs.
@@ -82,6 +84,7 @@ public final class TerminalView extends View {
     private static final int TEXT_COLOR = 0xFFDCDCDC;
 
     private final Screen screen = new Screen(80, 24);
+    private final Viewport viewport = new Viewport(screen);
     private final SpannableStringBuilder input = new SpannableStringBuilder();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     /** The bundled monospace face, or the system one when the host has no asset. */
@@ -102,6 +105,13 @@ public final class TerminalView extends View {
     private boolean blinkOn = true;
     /** True while the blink timer is posted. */
     private boolean blinking;
+    /** The finger's last row and the pixels not yet worth a whole row. */
+    private float touchLastY;
+    private float touchRemainder;
+    private boolean touchDragging;
+    private VelocityTracker touchVelocity;
+    /** Carries a drag on after the finger lifts. */
+    private final Scroller flinger = new Scroller(getContext());
 
     private final Runnable announcer = () -> {
         String line = pendingAnnouncement;
@@ -186,7 +196,12 @@ public final class TerminalView extends View {
         if (chunk == null || chunk.isEmpty()) {
             return;
         }
+        int before = screen.historyRows();
         screen.feed(chunk);
+        // A view scrolled back keeps its place while output grows the log; at
+        // the bottom it follows, and a full-screen program returns it.
+        viewport.followOutput(screen.historyRows() - before);
+        viewport.clamp();
         invalidate();
         startBlinking();
         notifyContentChanged();
@@ -272,6 +287,7 @@ public final class TerminalView extends View {
         int rows = Math.max(4, (int) (height / cellHeight) - 1);
         if (cols != screen.cols() || rows != screen.rows()) {
             screen.resize(cols, rows);
+            viewport.clamp();
             lastRows = new String[screen.rows()];
             for (int row = 0; row < screen.rows(); row++) {
                 lastRows[row] = screen.line(row);
@@ -289,13 +305,13 @@ public final class TerminalView extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         for (int row = 0; row < screen.rows(); row++) {
-            String line = screen.line(row);
+            String line = viewport.line(row);
             float baseline = row * cellHeight - paint.ascent();
             // A background is a filled cell whether or not there is a glyph in
             // it: a TUI's box is spaces with a colour behind them, and `line()`
             // has already trimmed those spaces away.
             for (int col = 0; col < screen.cols(); col++) {
-                int bg = screen.background(row, col);
+                int bg = viewport.background(row, col);
                 if (bg != 0) {
                     paint.setColor(0xFF000000 | bg);
                     canvas.drawRect(col * cellWidth, row * cellHeight,
@@ -304,7 +320,7 @@ public final class TerminalView extends View {
             }
             for (int col = 0; col < line.length(); col++) {
                 // SGR carries the foreground per cell; 0 means the default.
-                int fg = screen.foreground(row, col);
+                int fg = viewport.foreground(row, col);
                 paint.setColor(fg == 0 ? TEXT_COLOR : 0xFF000000 | fg);
                 canvas.drawText(line, col, col + 1, col * cellWidth, baseline, paint);
             }
@@ -318,6 +334,11 @@ public final class TerminalView extends View {
             if (screen.cursorVisible() && (!screen.cursorBlink() || blinkOn)) {
                 drawCursor(canvas, TEXT_COLOR);
             }
+            return;
+        }
+        // Scrolled back, the cursor's row is below the view: drawing it would
+        // put a block on a history row.
+        if (!viewport.atBottom()) {
             return;
         }
         // The shell's own cursor, at the position the program put it, inverted.
@@ -353,7 +374,7 @@ public final class TerminalView extends View {
         block.setColor(colour);
         canvas.drawRect(col * cellWidth, rowBaseline + paint.ascent(),
                 (col + 1) * cellWidth, rowBaseline + paint.descent(), block);
-        String under = screen.line(row);
+        String under = viewport.line(row);
         if (col < under.length()) {
             Paint glyph = new Paint(paint);
             glyph.setColor(Color.rgb(0x10, 0x14, 0x18));
@@ -523,16 +544,91 @@ public final class TerminalView extends View {
         }
     }
 
+    /**
+     * Dragging scrolls the log; a tap still asks for the keyboard.
+     *
+     * <p>Dragging down pulls older rows into view, the direction the content
+     * moves under the finger. The remainder is kept in pixels between events so
+     * a slow drag accumulates to a row instead of being rounded away each time.
+     */
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_UP) {
-            requestFocus();
-            InputMethodManager imm = getContext().getSystemService(InputMethodManager.class);
-            if (imm != null) {
-                imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
-            }
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                flinger.forceFinished(true);
+                touchLastY = event.getY();
+                touchRemainder = 0;
+                touchDragging = false;
+                if (touchVelocity == null) {
+                    touchVelocity = VelocityTracker.obtain();
+                } else {
+                    touchVelocity.clear();
+                }
+                touchVelocity.addMovement(event);
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                touchVelocity.addMovement(event);
+                touchRemainder += event.getY() - touchLastY;
+                touchLastY = event.getY();
+                if (Math.abs(touchRemainder) >= cellHeight / 2) {
+                    touchDragging = true;
+                }
+                int lines = (int) (touchRemainder / cellHeight);
+                if (lines != 0) {
+                    viewport.scrollBy(lines);
+                    touchRemainder -= lines * cellHeight;
+                    invalidate();
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+                touchVelocity.addMovement(event);
+                touchVelocity.computeCurrentVelocity(1000);
+                if (touchDragging) {
+                    fling((int) touchVelocity.getYVelocity());
+                } else {
+                    focusForTyping();
+                }
+                recycleVelocity();
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                recycleVelocity();
+                return true;
+            default:
+                return true;
         }
-        return true;
+    }
+
+    private void recycleVelocity() {
+        if (touchVelocity != null) {
+            touchVelocity.recycle();
+            touchVelocity = null;
+        }
+    }
+
+    /** Carries the drag on at finger speed, bounded by the stored history. */
+    private void fling(int velocityY) {
+        int max = viewport.maxOffset();
+        if (max == 0 || Math.abs(velocityY) < 200) {
+            return;
+        }
+        int row = Math.max(1, Math.round(cellHeight));
+        flinger.fling(0, viewport.offset() * row, 0, velocityY, 0, 0,
+                0, max * row);
+        postInvalidateOnAnimation();
+    }
+
+    /** A fling's frames: the offset follows the scroller until it settles. */
+    @Override
+    public void computeScroll() {
+        if (!flinger.computeScrollOffset()) {
+            return;
+        }
+        if (screen.isAlternate()) {
+            flinger.forceFinished(true);
+            return;
+        }
+        viewport.scrollTo(Math.round((float) flinger.getCurrY() / cellHeight));
+        postInvalidateOnAnimation();
     }
 
     private void submit() {
@@ -546,6 +642,8 @@ public final class TerminalView extends View {
     }
 
     private void inputChanged() {
+        // Typing is for the live prompt, so it brings a scrolled-back view home.
+        viewport.scrollToBottom();
         invalidate();
         AccessibilityEvent event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED);
         event.setPackageName(getContext().getPackageName());
@@ -570,7 +668,7 @@ public final class TerminalView extends View {
                 return inputNode();
             }
             int row = virtualViewId - FIRST_ROW_ID;
-            if (row >= 0 && row < screen.rows() && !screen.line(row).isEmpty()) {
+            if (row >= 0 && row < screen.rows() && !viewport.line(row).isEmpty()) {
                 return rowNode(row);
             }
             return null;
@@ -624,7 +722,7 @@ public final class TerminalView extends View {
                 }
                 accessibilityFocusedRow = virtualViewId;
                 sendVirtualEvent(AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
-                        virtualViewId, screen.line(row));
+                        virtualViewId, viewport.line(row));
                 return true;
             }
             if (action == AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS
@@ -680,7 +778,7 @@ public final class TerminalView extends View {
         node.setVisibleToUser(true);
         node.setBoundsInScreen(viewBounds());
         for (int row = 0; row < screen.rows(); row++) {
-            if (!screen.line(row).isEmpty()) {
+            if (!viewport.line(row).isEmpty()) {
                 node.addChild(this, FIRST_ROW_ID + row);
             }
         }
@@ -694,7 +792,7 @@ public final class TerminalView extends View {
         super.onInitializeAccessibilityNodeInfo(info);
         info.setClassName(TerminalView.class.getName());
         for (int row = 0; row < screen.rows(); row++) {
-            if (!screen.line(row).isEmpty()) {
+            if (!viewport.line(row).isEmpty()) {
                 info.addChild(this, FIRST_ROW_ID + row);
             }
         }
@@ -714,7 +812,7 @@ public final class TerminalView extends View {
         node.setParent(this);
         node.setPackageName(getContext().getPackageName());
         node.setClassName("android.widget.TextView");
-        node.setText(screen.line(row));
+        node.setText(viewport.line(row));
         node.setEnabled(true);
         node.setFocusable(true);
         node.setVisibleToUser(true);

@@ -95,18 +95,20 @@ beyond the flag.
 - [x] Preserve cells and foreground/background across history and resize.
 - [ ] Preserve wrap information across history and resize (a row is stored as
   cells today).
-- [ ] Add a scroll offset to `TerminalView`; follow output only while the view is
-  at the bottom; return to the bottom on input.
-- [ ] Touch drag/fling scrolling; keep the cursor and selection stable.
+- [x] Add a scroll offset to `TerminalView`; follow output only while the view
+  is at the bottom; return to the bottom on input.
+- [x] Touch drag/fling scrolling; the caret is not drawn while scrolled back,
+  because its row is below the view (selection arrives in 1.2).
 - [x] Make `screenText()` include history, so copy, `live-output.txt` and the
   accessibility snapshot do not lose earlier output.
 - [x] Model tests: overflow, limits, resize, alternate-screen isolation, partial
   regions, and `ED 3`.
-- [ ] View tests still needed: scroll back/forward, resize while scrolled, and a
-  3000-line stress case.
+- [ ] View tests still needed: an instrumented drag/fling on a device, and
+  resize while scrolled.
 
-Model state: 133 JVM checks pass; the view still has no scroll offset or touch
-gesture, so this slice is history storage and text exposure only.
+Model state: 133 screen checks and 34 viewport checks pass. The view keeps a
+scroll offset, follows output only at the bottom, and drags or flings the
+history; the 3000-line stress case is covered by the model test.
 
 ### 1.2 Selection and copy
 
