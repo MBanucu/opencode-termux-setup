@@ -338,9 +338,9 @@ final class Screen implements EscapeParser.Handler {
     @Override
     public void operatingSystemCommand(String payload) {
         if (payload.equals("10;?")) {
-            reply("\u001b]10;rgb:dcdc/dcdc/dcdc\u001b\\");
+            reply(Replies.FOREGROUND_COLOUR);
         } else if (payload.equals("11;?")) {
-            reply("\u001b]11;rgb:1010/1414/1818\u001b\\");
+            reply(Replies.BACKGROUND_COLOUR);
         }
     }
 
@@ -353,7 +353,7 @@ final class Screen implements EscapeParser.Handler {
                 applyModes(parts, last == 'h');
             } else if (last == 'u' && body.isEmpty()) {
                 // The kitty keyboard query: no enhanced flags are supported.
-                reply("\u001b[?0u");
+                reply(Replies.KEYBOARD_FLAGS);
             }
             return;
         }
@@ -368,14 +368,14 @@ final class Screen implements EscapeParser.Handler {
     private boolean reportIdentity(String body, char last) {
         if (last == 'c') {
             if (body.isEmpty()) {
-                reply("\u001b[?1;2c");
+                reply(Replies.PRIMARY_DEVICE_ATTRIBUTES);
             } else if (body.equals(">")) {
-                reply("\u001b[>84;0;0c");
+                reply(Replies.SECONDARY_DEVICE_ATTRIBUTES);
             }
             return true;
         }
         if (last == 'q' && body.startsWith(">")) {
-            reply("\u001bP>|terminal(1)\u001b\\");
+            reply(Replies.VERSION);
             return true;
         }
         return false;
@@ -430,9 +430,9 @@ final class Screen implements EscapeParser.Handler {
     void deviceStatus(String[] parts) {
         int request = number(parts, 0, 0);
         if (request == 5) {
-            reply("\u001b[0n");
+            reply(Replies.STATUS_OK);
         } else if (request == 6) {
-            reply("\u001b[" + (cursorRow() + 1) + ";" + (cursorCol() + 1) + "R");
+            reply(Replies.cursorPosition(cursorRow(), cursorCol()));
         }
     }
 
