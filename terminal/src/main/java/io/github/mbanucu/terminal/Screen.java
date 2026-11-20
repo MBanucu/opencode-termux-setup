@@ -16,12 +16,12 @@ import java.util.Arrays;
  * <p>Enough of ECMA-48 for a TUI, not an emulator: no scrolling regions across
  * buffers, no fonts, no mouse reporting, no replies to device queries.
  */
-final class Screen {
+final class Screen implements EscapeParser.Handler {
 
     /** The xterm page's scrollback depth, so the native view starts at parity. */
     static final int DEFAULT_HISTORY_LINES = 3000;
 
-    private final StringBuilder pending = new StringBuilder();
+    private final EscapeParser parser = new EscapeParser(this);
     private char[][] main;
     private char[][] alt;
     /** Whether each row of the primary buffer continues on the next row. */
@@ -56,6 +56,8 @@ final class Screen {
     private boolean cursorVisible = true;
     /** DEC mode 12 / DECSCUSR: whether the caret should blink. */
     private boolean cursorBlink;
+    /** DECCKM: arrows and Home/End use SS3 (ESC O) instead of CSI. */
+    private boolean applicationCursor;
     /** Between ?2026h and ?2026l, mode changes wait for the frame to end. */
     private boolean syncUpdate;
     private boolean pendingCursorVisible;
@@ -275,87 +277,50 @@ final class Screen {
         return cursorBlink;
     }
 
+    /** True while DECCKM is on and cursor keys should use the SS3 forms. */
+    boolean applicationCursorKeys() {
+        return applicationCursor;
+    }
+
     // --- input -----------------------------------------------------------------
 
     void feed(String chunk) {
-        pending.append(chunk);
-        int index = 0;
-        while (index < pending.length()) {
-            char c = pending.charAt(index);
-            if (c == 0x1b) {
-                int consumed = escapeAt(index);
-                if (consumed == 0) {
-                    break;
-                }
-                index += consumed;
-                continue;
-            }
-            if (c == '\r') {
-                cursorCol = 0;
-                wrapPending = false;
-            } else if (c == '\n') {
-                newline();
-            } else if (c == '\b') {
-                if (cursorCol > 0) {
-                    cursorCol--;
-                }
-                wrapPending = false;
-            } else if (c == '\t') {
-                cursorCol = Math.min(cols - 1, (cursorCol / 8 + 1) * 8);
-                wrapPending = false;
-            } else if (c >= 0x20 && c != 0x7f) {
-                put(c);
-            }
-            index++;
-        }
-        pending.delete(0, index);
-        // A sequence longer than any terminal could need is a program that is not
-        // a terminal's output; drop it rather than growing forever.
-        if (pending.length() > 8192) {
-            pending.setLength(0);
-        }
+        parser.feed(chunk);
     }
 
-    /** Number of characters this escape takes, or 0 when it is not complete yet. */
-    private int escapeAt(int index) {
-        int length = pending.length();
-        if (index + 1 >= length) {
-            return 0;
+    @Override
+    public void text(char c) {
+        put(c);
+    }
+
+    @Override
+    public void carriageReturn() {
+        cursorCol = 0;
+        wrapPending = false;
+    }
+
+    @Override
+    public void lineFeed() {
+        newline();
+    }
+
+    @Override
+    public void backspace() {
+        if (cursorCol > 0) {
+            cursorCol--;
         }
-        char kind = pending.charAt(index + 1);
-        if (kind == '[') {
-            for (int j = index + 2; j < length; j++) {
-                char c = pending.charAt(j);
-                if (c >= 0x40 && c <= 0x7e) {
-                    csi(pending.substring(index + 2, j), c);
-                    return j - index + 1;
-                }
-            }
-            return 0;
-        }
-        if (kind == ']' || kind == 'P' || kind == 'X' || kind == '^' || kind == '_') {
-            // OSC, DCS, SOS, PM and APC are strings, not text. opencode asks its
-            // termcap question with DCS (+q4d73); the payload is not a row.
-            for (int j = index + 2; j < length; j++) {
-                char c = pending.charAt(j);
-                if (c == 0x07) {
-                    return j - index + 1;
-                }
-                if (c == 0x1b) {
-                    if (j + 1 >= length) {
-                        return 0;
-                    }
-                    if (pending.charAt(j + 1) == '\\') {
-                        return j - index + 2;
-                    }
-                }
-            }
-            return 0;
-        }
-        if (kind == '(' || kind == ')' || kind == '*' || kind == '+') {
-            return index + 2 < length ? 3 : 0;
-        }
-        return 2;
+        wrapPending = false;
+    }
+
+    @Override
+    public void tab() {
+        cursorCol = Math.min(cols - 1, (cursorCol / 8 + 1) * 8);
+        wrapPending = false;
+    }
+
+    @Override
+    public void controlSequence(String raw, char last) {
+        csi(raw, last);
     }
 
     private void csi(String raw, char last) {
@@ -405,6 +370,8 @@ final class Screen {
                 } else {
                     cursorVisible = set;
                 }
+            } else if (mode == 1) {
+                applicationCursor = set;
             } else if (mode == 12) {
                 cursorBlink = set;
             } else if (mode == 47 || mode == 1047 || mode == 1049) {

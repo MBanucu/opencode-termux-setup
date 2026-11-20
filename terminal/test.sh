@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Runs the grid's tests on the JVM. Screen, Scrollback, HistoryRow, AnsiPalette,
-# Viewport and Selection have no Android dependency, so this needs no device,
-# no Gradle and no test framework - only a javac.
+# Runs the grid's tests on the JVM. The screen model, its parser, history,
+# viewport, selection and key encoder have no Android dependency, so this needs
+# no device, no Gradle and no test framework - only a javac.
 #
 #   bash terminal/test.sh
 set -euo pipefail
@@ -13,17 +13,25 @@ mkdir -p "$work"
 
 javac -nowarn --release 17 -d "$work" \
     "$here/src/main/java/io/github/mbanucu/terminal/Screen.java" \
+    "$here/src/main/java/io/github/mbanucu/terminal/EscapeParser.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/Scrollback.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/HistoryRow.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/AnsiPalette.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/Viewport.java" \
     "$here/src/main/java/io/github/mbanucu/terminal/Selection.java" \
+    "$here/src/main/java/io/github/mbanucu/terminal/KeyEncoder.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/TestSupport.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/ScreenTest.java" \
+    "$here/src/test/java/io/github/mbanucu/terminal/ColourTest.java" \
+    "$here/src/test/java/io/github/mbanucu/terminal/WritingTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/ScrollbackTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/ViewportTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/SelectionTest.java"
+    "$here/src/test/java/io/github/mbanucu/terminal/SelectionTest.java" \
+    "$here/src/test/java/io/github/mbanucu/terminal/KeyEncoderTest.java"
 java -cp "$work" io.github.mbanucu.terminal.ScreenTest
+java -cp "$work" io.github.mbanucu.terminal.ColourTest
+java -cp "$work" io.github.mbanucu.terminal.WritingTest
 java -cp "$work" io.github.mbanucu.terminal.ScrollbackTest
 java -cp "$work" io.github.mbanucu.terminal.ViewportTest
 java -cp "$work" io.github.mbanucu.terminal.SelectionTest
+java -cp "$work" io.github.mbanucu.terminal.KeyEncoderTest

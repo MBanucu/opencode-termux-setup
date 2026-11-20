@@ -452,10 +452,20 @@ public final class TerminalView extends View {
                 }
                 return true;
             default:
+                int named = encodedKey(event.getKeyCode());
+                if (named != 0) {
+                    if (raw) {
+                        rawInput.onInput(KeyEncoder.encode(named, event.isCtrlPressed(),
+                                event.isAltPressed(), event.isShiftPressed(),
+                                screen.applicationCursorKeys()));
+                    }
+                    return true;
+                }
                 int unicode = event.getUnicodeChar();
                 if (unicode >= 0x20) {
                     if (raw) {
-                        rawInput.onInput(String.valueOf((char) unicode));
+                        rawInput.onInput(KeyEncoder.encodeCharacter((char) unicode,
+                                event.isCtrlPressed(), event.isAltPressed()));
                     } else {
                         input.append((char) unicode);
                         inputChanged();
@@ -463,6 +473,62 @@ public final class TerminalView extends View {
                     return true;
                 }
                 return false;
+        }
+    }
+
+    /** The module's key id for an Android key code, or 0 for a text key. */
+    private static int encodedKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+                return KeyEncoder.UP;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                return KeyEncoder.DOWN;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return KeyEncoder.RIGHT;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                return KeyEncoder.LEFT;
+            case KeyEvent.KEYCODE_MOVE_HOME:
+                return KeyEncoder.HOME;
+            case KeyEvent.KEYCODE_MOVE_END:
+                return KeyEncoder.END;
+            case KeyEvent.KEYCODE_PAGE_UP:
+                return KeyEncoder.PAGE_UP;
+            case KeyEvent.KEYCODE_PAGE_DOWN:
+                return KeyEncoder.PAGE_DOWN;
+            case KeyEvent.KEYCODE_INSERT:
+                return KeyEncoder.INSERT;
+            case KeyEvent.KEYCODE_FORWARD_DEL:
+                return KeyEncoder.DELETE;
+            case KeyEvent.KEYCODE_ESCAPE:
+                return KeyEncoder.ESCAPE;
+            case KeyEvent.KEYCODE_TAB:
+                return KeyEncoder.TAB;
+            case KeyEvent.KEYCODE_F1:
+                return KeyEncoder.F1;
+            case KeyEvent.KEYCODE_F2:
+                return KeyEncoder.F2;
+            case KeyEvent.KEYCODE_F3:
+                return KeyEncoder.F3;
+            case KeyEvent.KEYCODE_F4:
+                return KeyEncoder.F4;
+            case KeyEvent.KEYCODE_F5:
+                return KeyEncoder.F5;
+            case KeyEvent.KEYCODE_F6:
+                return KeyEncoder.F6;
+            case KeyEvent.KEYCODE_F7:
+                return KeyEncoder.F7;
+            case KeyEvent.KEYCODE_F8:
+                return KeyEncoder.F8;
+            case KeyEvent.KEYCODE_F9:
+                return KeyEncoder.F9;
+            case KeyEvent.KEYCODE_F10:
+                return KeyEncoder.F10;
+            case KeyEvent.KEYCODE_F11:
+                return KeyEncoder.F11;
+            case KeyEvent.KEYCODE_F12:
+                return KeyEncoder.F12;
+            default:
+                return 0;
         }
     }
 

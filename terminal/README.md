@@ -20,6 +20,7 @@ comparison with xterm.js in a WebView, is
 | `AnsiPalette` | the 16-colour palette, the 256-colour cube and bold brightening. Package-private |
 | `Viewport` | the window over the history and the live grid: scroll offset, clamping, follow-at-bottom. Package-private |
 | `Selection` | an inclusive cell range over the viewport, and the text it copies with hard breaks kept and wrapped rows joined. Package-private |
+| `KeyEncoder` | the bytes a hardware key sends, normal or application-cursor mode. Package-private |
 | `TerminalAccessibility` | the row and prompt nodes, their events, and the announcement timer. Package-private |
 
 `TerminalView` loads `terminal-mono.ttf` from the host app's assets when present —
@@ -43,6 +44,11 @@ screen, because a full-screen program owns the display.
 A row the terminal wrapped itself is marked as continuing on the next row, and
 `text()`/`screenText()` join the two instead of inserting a newline the program
 never wrote; the flag follows the row into history and survives a resize.
+
+A program on the alternate screen receives hardware keys as terminal bytes:
+arrows, Home/End, Page up/down, Insert/Delete, Esc, Tab, Backspace and
+F1-F12, with DECCKM switching arrows and Home/End to the `ESC O` forms.
+Ctrl and Alt modify typed characters in that mode.
 
 Dragging the view scrolls back through the primary screen's history, and a fling
 carries on at finger speed. While scrolled back, output that pushes rows into
@@ -89,7 +95,8 @@ including escapes split across two `feed` calls. The viewport checks cover
 scrolling into history, clamping at both ends, output while scrolled back not
 moving the row being read, the alternate screen resetting the view, `ED 3`, and
 a 3000-line history. The selection checks cover inclusive ranges, backwards
-drags, hard breaks versus wrapped rows, scrollback and clamping. They need no
+drags, hard breaks versus wrapped rows, scrollback and clamping. The key checks cover each named
+sequence, application-cursor mode, and the control/escape forms. They need no
 device, no Gradle and no test framework, because the models are plain Java. The view itself needs a device
 and is covered by `samples/e2e.sh`.
 

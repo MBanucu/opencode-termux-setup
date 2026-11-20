@@ -2,7 +2,6 @@ package io.github.mbanucu.terminal;
 
 import static io.github.mbanucu.terminal.TestSupport.check;
 import static io.github.mbanucu.terminal.TestSupport.cursor;
-import static io.github.mbanucu.terminal.TestSupport.hex;
 
 /**
  * Checks the grid against the escape sequences a program actually sends.
@@ -24,15 +23,9 @@ public final class ScreenTest {
         scrollCommands();
         alternateScreen();
         cursorVisibility();
-        coloursAreConsumed();
-        colours();
-        backgrounds();
+        cursorKeys();
         titlesAreSwallowed();
         splitSequences();
-        wrapping();
-        wrappingIsRemembered();
-        backspaceAndTab();
-        saveAndRestore();
         resize();
 
         TestSupport.report("screen checks");
@@ -236,111 +229,6 @@ public final class ScreenTest {
                 String.valueOf(hidden.cursorVisible()));
     }
 
-    // --- sequences that must not print -------------------------------------------
-
-    private static void coloursAreConsumed() {
-        Screen screen = new Screen(20, 4);
-        screen.feed("\u001b[1;31;44mred\u001b[0m plain");
-        check("SGR does not print anything", "red plain", screen.line(0));
-
-        Screen cursor = new Screen(20, 4);
-        cursor.feed("\u001b[?25l\u001b[?25hx");
-        check("cursor-visibility modes are not text", "x", cursor.line(0));
-    }
-
-    private static void colours() {
-        Screen palette = new Screen(30, 4);
-        palette.feed("\u001b[31mred\u001b[0m plain");
-        check("SGR 31 colours its text", "0xcc0000", hex(palette.foreground(0, 0)));
-        check("SGR 0 returns the rest to the default colour", "0x000000",
-                hex(palette.foreground(0, 3)));
-
-        Screen bright = new Screen(20, 4);
-        bright.feed("\u001b[1;32mbold");
-        check("bold brightens a palette colour", "0x8ae234", hex(bright.foreground(0, 0)));
-        check("bold is cleared by SGR 22", "0x4e9a06", boldAfterReset());
-
-        Screen grey = new Screen(20, 4);
-        grey.feed("\u001b[90mgrey");
-        check("SGR 90 is bright black", "0x555753", hex(grey.foreground(0, 0)));
-
-        Screen cube = new Screen(20, 4);
-        cube.feed("\u001b[38;5;208morange");
-        check("SGR 38;5;208 is the 256-colour cube entry", "0xff8700",
-                hex(cube.foreground(0, 0)));
-
-        Screen truecolor = new Screen(20, 4);
-        truecolor.feed("\u001b[38;2;10;20;30mrgb");
-        check("SGR 38;2;r;g;b is truecolor", "0x0a141e", hex(truecolor.foreground(0, 0)));
-
-        Screen cleared = new Screen(20, 4);
-        cleared.feed("\u001b[31mred\u001b[2J");
-        check("clearing the screen clears the colours", "0x000000",
-                hex(cleared.foreground(0, 0)));
-
-        Screen background = new Screen(20, 4);
-        background.feed("\u001b[44mblue background");
-        check("a background code leaves the foreground alone", "0x000000",
-                hex(background.foreground(0, 0)));
-    }
-
-    private static void backgrounds() {
-        Screen fill = new Screen(20, 4);
-        fill.feed("\u001b[44mblue");
-        check("SGR 44 fills the cells behind the text", "0x3465a4",
-                hex(fill.background(0, 0)));
-        check("a background leaves the foreground alone", "0x000000",
-                hex(fill.foreground(0, 0)));
-        fill.feed("\u001b[49m plain");
-        check("SGR 49 leaves what was already drawn", "0x3465a4",
-                hex(fill.background(0, 0)));
-        check("SGR 49 restores the default for what follows", "0x000000",
-                hex(fill.background(0, 5)));
-
-        Screen cube = new Screen(20, 4);
-        cube.feed("\u001b[48;5;208morange");
-        check("SGR 48;5;n is the 256-colour cube", "0xff8700",
-                hex(cube.background(0, 0)));
-
-        Screen truecolor = new Screen(20, 4);
-        truecolor.feed("\u001b[48;2;10;20;30mrgb");
-        check("SGR 48;2;r;g;b is truecolor", "0x0a141e",
-                hex(truecolor.background(0, 0)));
-
-        Screen reset = new Screen(20, 4);
-        reset.feed("\u001b[44m\u001b[0mplain");
-        check("SGR 0 clears the background too", "0x000000", hex(reset.background(0, 0)));
-
-        Screen cleared = new Screen(20, 4);
-        cleared.feed("\u001b[44m\u001b[2J");
-        check("clearing with a background in force fills it", "0x3465a4",
-                hex(cleared.background(0, 0)));
-
-        Screen erased = new Screen(20, 4);
-        erased.feed("\u001b[44mxx\u001b[1;1H\u001b[0K");
-        check("erasing a line fills with the background in force", "0x3465a4",
-                hex(erased.background(0, 1)));
-
-        // What ncurses actually does for a box's fill: one space, then ECH.
-        Screen eol = new Screen(20, 4);
-        eol.feed("\u001b[44m \u001b[3X");
-        check("ECH fills with the background in force", "0x3465a4",
-                hex(eol.background(0, 2)));
-
-        Screen rep = new Screen(20, 4);
-        rep.feed("\u001b[44m \u001b[3b");
-        check("REP repeats the last character with its background", "0x3465a4",
-                hex(rep.background(0, 3)));
-        check("REP leaves the text as spaces", "", rep.line(0));
-    }
-
-    /** Bold set, then 22: the colour stays, the brightness goes. */
-    private static String boldAfterReset() {
-        Screen screen = new Screen(20, 4);
-        screen.feed("\u001b[1;32mbold\u001b[22mplain");
-        return hex(screen.foreground(0, 4));
-    }
-
     private static void titlesAreSwallowed() {
         Screen bel = new Screen(20, 4);
         bel.feed("\u001b]2;a title\u0007x");
@@ -385,113 +273,16 @@ public final class ScreenTest {
         check("a split DCS is swallowed whole", "z", dcs.line(0));
     }
 
-    // --- writing -----------------------------------------------------------------
-
-    private static void wrapping() {
-        Screen screen = new Screen(5, 3);
-        screen.feed("abcde");
-        check("the last column holds its character", "abcde", screen.line(0));
-        check("the cursor waits on the last column", "0,4", cursor(screen));
-        screen.feed("f");
-        check("the next character starts a new row", "f", screen.line(1));
-        check("the cursor is past that character", "1,1", cursor(screen));
-
-        Screen carriage = new Screen(5, 3);
-        carriage.feed("abcde\rX");
-        check("a carriage return cancels the pending wrap", "Xbcde", carriage.line(0));
-
-        Screen newline = new Screen(5, 3);
-        newline.feed("ab\r\ncd");
-        check("CRLF returns to column 1", "cd", newline.line(1));
-    }
-
-    /**
-     * A row the terminal wrapped is continued below it, and copy or a reader
-     * should not see a newline the program never wrote.
-     */
-    private static void wrappingIsRemembered() {
-        Screen screen = new Screen(5, 3);
-        screen.feed("abcde");
-        check("a full row is not wrapped yet", "false",
-                String.valueOf(screen.wrapped(0)));
-        screen.feed("f");
-        check("the row that wrapped says so", "true",
-                String.valueOf(screen.wrapped(0)));
-        check("the continuation row does not", "false",
-                String.valueOf(screen.wrapped(1)));
-        check("text joins a wrapped row to its continuation", "abcdef\n", screen.text());
-
-        Screen carriage = new Screen(5, 3);
-        carriage.feed("abcde\rX");
-        check("a carriage return does not leave a wrapped row", "false",
-                String.valueOf(carriage.wrapped(0)));
-
-        Screen hard = new Screen(5, 3);
-        hard.feed("abc\r\ndef");
-        check("a hard CRLF separates rows", "abc\ndef\n", hard.text());
-
-        Screen scrolled = new Screen(5, 2);
-        scrolled.feed("abcdef\r\n");
-        check("history keeps the wrap flag", "true",
-                String.valueOf(scrolled.historyWrapped(0)));
-        check("textWithHistory joins the history row to the screen", "abcdef\n",
-                scrolled.textWithHistory());
-
-        Screen resized = new Screen(5, 3);
-        resized.feed("abcdef");
-        resized.resize(8, 4);
-        check("a wider grid keeps the wrap flag", "true",
-                String.valueOf(resized.wrapped(0)));
-        check("a new row is not wrapped", "false",
-                String.valueOf(resized.wrapped(2)));
-
-        Screen narrowing = new Screen(5, 3);
-        narrowing.feed("abcdef");
-        narrowing.resize(3, 3);
-        check("a narrower grid keeps the wrap flag", "true",
-                String.valueOf(narrowing.wrapped(0)));
-
-        Screen historyResized = new Screen(5, 2);
-        historyResized.feed("abcdef\r\n");
-        historyResized.resize(8, 2);
-        check("history keeps the wrap flag across resize", "true",
-                String.valueOf(historyResized.historyWrapped(0)));
-
-        Screen inserted = new Screen(5, 4);
-        inserted.feed("\r\nabcdef");
-        inserted.feed("\u001b[1;1H\u001b[L");
-        check("inserting a line moves the wrap flag with its row", "true",
-                String.valueOf(inserted.wrapped(2)));
-        check("the line insert opened is not wrapped", "false",
-                String.valueOf(inserted.wrapped(1)));
-
-        Screen deleted = new Screen(5, 4);
-        deleted.feed("\r\nabcdef");
-        deleted.feed("\u001b[1;1H\u001b[M");
-        check("deleting a line moves the wrap flag up with its row", "true",
-                String.valueOf(deleted.wrapped(0)));
-
-        Screen cleared = new Screen(5, 3);
-        cleared.feed("abcdef");
-        cleared.feed("\u001b[2J");
-        check("clearing the screen clears the wrap flags", "false",
-                String.valueOf(cleared.wrapped(0)));
-    }
-
-    private static void backspaceAndTab() {
-        Screen back = new Screen(20, 4);
-        back.feed("abc\u0008X");
-        check("a backspace moves the cursor, not the text", "abX", back.line(0));
-
-        Screen tab = new Screen(20, 4);
-        tab.feed("\tX");
-        check("a tab reaches the next multiple of 8", "        X", tab.line(0));
-    }
-
-    private static void saveAndRestore() {
-        Screen screen = new Screen(20, 4);
-        screen.feed("ab\u001b[s cd\u001b[uX");
-        check("the cursor is restored by CSI u", "abXcd", screen.line(0));
+    private static void cursorKeys() {
+        Screen screen = new Screen(10, 3);
+        check("cursor keys start in normal mode", "false",
+                String.valueOf(screen.applicationCursorKeys()));
+        screen.feed("\033[?1h");
+        check("DECCKM asks for application cursor keys", "true",
+                String.valueOf(screen.applicationCursorKeys()));
+        screen.feed("\033[?1l");
+        check("and normal ones again", "false",
+                String.valueOf(screen.applicationCursorKeys()));
     }
 
     // --- resize ------------------------------------------------------------------

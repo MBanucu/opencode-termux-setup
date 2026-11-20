@@ -72,8 +72,8 @@ file named for it:
   announcement timer.
 - [x] `Screen.csi` splits into private-mode handling (`applyModes`) and the
   non-private dispatch (`dispatch`).
-- [ ] Keep key encoding and query replies in their own files (`KeyEncoder`,
-  `QueryReplies`) when 1.3 and 1.4 add their tables.
+- [x] `KeyEncoder` — named hardware keys and modified characters.
+- [ ] Keep query replies in `QueryReplies` when 1.4 adds its table.
 
 ## Phase 0 — decide the shape
 
@@ -145,13 +145,18 @@ UI, clipboard and resize test remain.
 
 ### 1.3 Key encoding
 
-- [ ] Encode hardware keys: arrows, Home/End, PgUp/PgDn, Insert/Delete, Esc,
+- [x] Encode hardware keys: arrows, Home/End, PgUp/PgDn, Insert/Delete, Esc,
   Tab, Backspace and F1-F12.
-- [ ] DECCKM/application-cursor mode for arrows and Home/End.
-- [ ] Ctrl/Alt modifiers and IME action; keep the IME text/Enter path.
+- [x] DECCKM/application-cursor mode for arrows and Home/End.
+- [x] Ctrl/Alt modifiers for typed characters and IME action; the IME
+  text/Enter path is unchanged.
 - [ ] Keep the app's footer keys able to send their bytes directly; the module
   must also be complete for a hardware keyboard.
 - [ ] Tests with a scripted pty that echoes the received byte sequences.
+
+Model state: named keys, DECCKM and the Ctrl/Alt character forms are covered by
+`KeyEncoderTest`; modifier-encoded arrow sequences, the footer key path and the
+scripted-pty test remain.
 
 ### 1.4 Query replies
 
