@@ -257,7 +257,6 @@ public final class TerminalView extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         for (int row = 0; row < screen.rows(); row++) {
-            String line = viewport.line(row);
             float baseline = row * cellHeight - paint.ascent();
             // A background is a filled cell whether or not there is a glyph in
             // it: a TUI's box is spaces with a colour behind them, and `line()`
@@ -273,7 +272,11 @@ public final class TerminalView extends View {
                             (col + 1) * cellWidth, (row + 1) * cellHeight, paint);
                 }
             }
-            for (int col = 0; col < line.length(); col++) {
+            for (int col = 0; col < screen.cols(); col++) {
+                char glyph = viewport.cell(row, col);
+                if (glyph == 0 || glyph == ' ') {
+                    continue;
+                }
                 int attributes = viewport.attribute(row, col);
                 if (CellAttributes.has(attributes, CellAttributes.HIDDEN)) {
                     continue;
@@ -282,19 +285,26 @@ public final class TerminalView extends View {
                 // the default.
                 int colour = textColour(attributes, viewport.foreground(row, col),
                         viewport.background(row, col));
+                int width = Width.of(glyph);
+                float drawnWidth = width * cellWidth;
+                String text = String.valueOf(glyph);
                 paint.setColor(colour);
                 paint.setTypeface(CellAttributes.has(attributes, CellAttributes.ITALIC)
                         ? italicTypeface() : typeface);
-                canvas.drawText(line, col, col + 1, col * cellWidth, baseline, paint);
+                float advance = paint.measureText(text);
+                paint.setTextScaleX(advance > 0 ? drawnWidth / advance : 1f);
+                canvas.drawText(text, col * cellWidth, baseline, paint);
+                paint.setTextScaleX(1f);
                 if (CellAttributes.has(attributes, CellAttributes.UNDERLINE)) {
                     paint.setColor(colour);
                     canvas.drawRect(col * cellWidth, baseline + 1,
-                            (col + 1) * cellWidth, baseline + 2, paint);
+                            col * cellWidth + drawnWidth, baseline + 2, paint);
                 }
                 if (CellAttributes.has(attributes, CellAttributes.STRIKETHROUGH)) {
                     float y = row * cellHeight + cellHeight / 2;
                     paint.setColor(colour);
-                    canvas.drawRect(col * cellWidth, y, (col + 1) * cellWidth, y + 1, paint);
+                    canvas.drawRect(col * cellWidth, y, col * cellWidth + drawnWidth,
+                            y + 1, paint);
                 }
             }
         }
@@ -348,11 +358,11 @@ public final class TerminalView extends View {
         block.setColor(colour);
         canvas.drawRect(col * cellWidth, rowBaseline + paint.ascent(),
                 (col + 1) * cellWidth, rowBaseline + paint.descent(), block);
-        String under = viewport.line(row);
-        if (col < under.length()) {
+        char under = viewport.cell(row, col);
+        if (under != 0 && under != ' ') {
             Paint glyph = new Paint(paint);
-            glyph.setColor(Color.rgb(0x10, 0x14, 0x18));
-            canvas.drawText(under, col, col + 1, col * cellWidth, rowBaseline, glyph);
+            glyph.setColor(WINDOW_BACKGROUND);
+            canvas.drawText(String.valueOf(under), col * cellWidth, rowBaseline, glyph);
         }
     }
 

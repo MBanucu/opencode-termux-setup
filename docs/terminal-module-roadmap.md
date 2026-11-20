@@ -12,8 +12,8 @@ queries, and encodes hardware keys including modified cursor keys. Thirteen JVM
 suites (298 checks) pass without a device, and `samples/native-terminal` builds.
 
 What remains is concentrated in four places: the selection/copy UI (1.2),
-mouse encoding and paste wrapping (1.5), wide and combining characters (1.6),
-and any measurement at all (1.8). The app is still on the xterm page;
+mouse encoding and paste wrapping (1.5), combining marks and emoji (1.6), and
+any measurement at all (1.8). The app is still on the xterm page;
 `PageActivity` has only been read, not changed.
 
 The app's terminal page currently uses a WebView and xterm.js. The
@@ -232,14 +232,23 @@ clipboard bytes raw, so the wrapping half of 2004 has no caller yet.
 
 ### 1.6 Wide and combining characters
 
-- [ ] Use a width table (`wcwidth`-style) for width-2 cells and combining marks.
-- [ ] Store enough per cell for a wide glyph and its continuation.
-- [ ] Tests for CJK, emoji, combining accents and cursor movement over them.
+- [x] Width table for the East Asian wide and fullwidth ranges (`Width`).
+- [x] Store a wide glyph in two cells, with a continuation marker that carries
+  the same colours and attributes.
+- [x] Keep a wide glyph whole at the right edge and wrap it to the next row.
+- [x] CJK tests: two cells, background, wrap, right edge, history, resize and
+  erase.
+- [ ] Combining marks attached to the preceding cell.
+- [ ] Emoji (surrogate pairs) as one glyph.
+- [ ] Tests for emoji and combining accents, and cursor movement over them.
 
-Model state: a cell is one `char`, so a surrogate pair or a combining mark
-occupies two cells today; `line()` trims spaces and NULs from the right. A width
-table and a continuation marker have to land in `Screen`, `HistoryRow` and
-`TerminalView` together, because history and the viewport copy cells unchanged.
+Model state: `Screen.put` asks `Width.of`, writes the glyph and a 0 continuation
+cell, and advances two columns; `line()` and `HistoryRow.text()` skip
+continuations; `TerminalView` draws cell by cell and scales a wide glyph across
+both columns. The cell is still one `char`, so combining marks and astral
+characters remain one char per cell - the next change is a cell representation
+that can hold a base plus marks (or a code point), which reaches `HistoryRow`,
+`Selection` and the view together.
 
 ### 1.7 Remaining `SGR`
 

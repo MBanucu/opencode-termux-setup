@@ -19,6 +19,7 @@ comparison with xterm.js in a WebView, is
 | `HistoryRow` | one row of primary-screen scrollback, with the colours and SGR attributes of its cells. Package-private |
 | `AnsiPalette` | the 16-colour palette, the 256-colour cube and bold brightening. Package-private |
 | `CellAttributes` | the per-cell SGR bits the view draws differently: underline, reverse, dim, italic, strikethrough, hidden. Package-private |
+| `Width` | the display width of a character in cells: 2 for CJK/fullwidth, 1 otherwise. Package-private |
 | `Viewport` | the window over the history and the live grid: scroll offset, clamping, follow-at-bottom. Package-private |
 | `Selection` | an inclusive cell range over the viewport, and the text it copies with hard breaks kept and wrapped rows joined. Package-private |
 | `KeyEncoder` | the bytes a hardware key sends, normal or application-cursor mode. Package-private |
@@ -123,8 +124,10 @@ and is covered by `samples/e2e.sh`.
   italic, strikethrough and hidden. It keeps a primary-screen scrollback (the
   alternate screen is the program's own) and a cell-range selection model that
   copies hard breaks and wrapped rows correctly, but it has no long-press
-  handles, clipboard wiring, mouse or bracketed-paste state. Enough to draw a TUI and read it; not enough to be
-  someone's daily terminal without more work.
+  handles, clipboard wiring or mouse events; bracketed paste and focus modes
+  are tracked, though a paste is not wrapped yet. Width-2 CJK glyphs take two
+  cells and wrap whole; combining marks and emoji do not. Enough to draw a TUI
+  and read it; not enough to be someone's daily terminal without more work.
 - **Not a transport.** An app-owned `forkpty` pty and Termux's `RUN_COMMAND` session
   are both in the sample, and both are the caller's business. The size callback is the
   whole contract between the view and the program.

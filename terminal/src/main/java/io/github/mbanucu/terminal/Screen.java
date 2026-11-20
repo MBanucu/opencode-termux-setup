@@ -180,7 +180,22 @@ final class Screen implements EscapeParser.Handler {
         while (end > 0 && (chars[end - 1] == ' ' || chars[end - 1] == 0)) {
             end--;
         }
-        return new String(chars, 0, end);
+        StringBuilder text = new StringBuilder(end);
+        for (int col = 0; col < end; col++) {
+            // A continuation cell is half of a wide glyph, not a character.
+            if (chars[col] != 0) {
+                text.append(chars[col]);
+            }
+        }
+        return text.toString();
+    }
+
+    /** One cell's character: 0 for the continuation of a wide glyph. */
+    char cell(int row, int col) {
+        if (row < 0 || row >= rows || col < 0 || col >= cols) {
+            return ' ';
+        }
+        return cells[row][col];
     }
 
     /** The background of one cell: 0xRRGGBB, or 0 for the view's default. */
@@ -197,6 +212,11 @@ final class Screen implements EscapeParser.Handler {
             return 0;
         }
         return colours[row][col];
+    }
+
+    /** One history cell's character: 0 for the continuation of a wide glyph. */
+    char historyCell(int row, int col) {
+        return scrollback.cell(row, col);
     }
 
     /** The SGR attributes one cell was drawn with, as {@link CellAttributes} bits. */
@@ -585,17 +605,33 @@ final class Screen implements EscapeParser.Handler {
             newline();
             wrapPending = false;
         }
+        int width = Width.of(c);
+        if (width == 2 && cursorCol == cols - 1) {
+            // A wide glyph cannot straddle the edge: it moves to the next row
+            // whole, and the row it leaves is a wrapped one.
+            wrapped[cursorRow] = true;
+            cursorCol = 0;
+            newline();
+        }
         cells[cursorRow][cursorCol] = c;
         // Bold is applied here, not when the code is read: SGR 22 turns it off
         // for what follows and leaves what is already on screen bright.
         colours[cursorRow][cursorCol] = sgr.drawnForeground();
         backgrounds[cursorRow][cursorCol] = sgr.background();
         attributes[cursorRow][cursorCol] = sgr.attributes();
+        if (width == 2) {
+            // The second cell is a continuation marker, not text; it keeps the
+            // same look so a background fills both cells.
+            cells[cursorRow][cursorCol + 1] = 0;
+            colours[cursorRow][cursorCol + 1] = sgr.drawnForeground();
+            backgrounds[cursorRow][cursorCol + 1] = sgr.background();
+            attributes[cursorRow][cursorCol + 1] = sgr.attributes();
+        }
         lastChar = c;
-        if (cursorCol >= cols - 1) {
+        if (cursorCol + width >= cols) {
             wrapPending = true;
         } else {
-            cursorCol++;
+            cursorCol += width;
         }
     }
 

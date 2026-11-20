@@ -31,7 +31,17 @@ final class HistoryRow {
         while (end > 0 && (chars[end - 1] == ' ' || chars[end - 1] == 0)) {
             end--;
         }
-        return new String(chars, 0, end);
+        StringBuilder text = new StringBuilder(end);
+        for (int col = 0; col < end; col++) {
+            if (chars[col] != 0) {
+                text.append(chars[col]);
+            }
+        }
+        return text.toString();
+    }
+
+    char cell(int col) {
+        return col >= 0 && col < chars.length ? chars[col] : ' ';
     }
 
     int foreground(int col) {

@@ -108,6 +108,18 @@ final class Viewport {
         return screen.background(history - screen.historyRows(), col);
     }
 
+    /** One visible cell's character: 0 for the continuation of a wide glyph. */
+    char cell(int row, int col) {
+        if (screen.isAlternate()) {
+            return screen.cell(row, col);
+        }
+        int history = historyRow(row);
+        if (history >= 0 && history < screen.historyRows()) {
+            return screen.historyCell(history, col);
+        }
+        return screen.cell(history - screen.historyRows(), col);
+    }
+
     /** The SGR attributes of one visible cell, as {@link CellAttributes} bits. */
     int attribute(int row, int col) {
         if (screen.isAlternate()) {

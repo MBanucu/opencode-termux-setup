@@ -66,6 +66,13 @@ final class Scrollback {
         return rows.get(row).background(col);
     }
 
+    char cell(int row, int col) {
+        if (row < 0 || row >= rows.size()) {
+            return ' ';
+        }
+        return rows.get(row).cell(col);
+    }
+
     int attribute(int row, int col) {
         if (row < 0 || row >= rows.size()) {
             return 0;
