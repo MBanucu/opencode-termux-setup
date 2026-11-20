@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">A11y probe</string>
+    <string name="probe_description">Reads the accessibility tree of the window in front and writes it to a file, so a test can compare what a terminal exposes.</string>
+</resources>

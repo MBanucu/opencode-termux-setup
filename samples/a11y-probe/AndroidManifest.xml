@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.mbanucu.samples.a11yprobe">
+
+    <application
+        android:label="A11y probe"
+        android:allowBackup="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="A11y probe">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- The service a screen reader would be. It is what reads a terminal's
+             accessibility tree and performs actions on it; enabling it with
+             `settings put secure enabled_accessibility_services` needs no root. -->
+        <service
+            android:name=".ProbeService"
+            android:exported="true"
+            android:label="A11y probe"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/probe" />
+        </service>
+
+        <!-- Commands arrive from adb: dump the tree, set text, focus, click. -->
+        <receiver
+            android:name=".ProbeCommand"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.mbanucu.samples.a11yprobe.COMMAND" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

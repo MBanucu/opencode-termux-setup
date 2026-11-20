@@ -3,3 +3,9 @@ test/.timings.db
 test/recordings/
 android/local.properties
 __pycache__/
+
+# Sample apps build to out/; xterm.js is copied into the WebView sample at
+# build time so the repository keeps one copy of it.
+samples/out/
+samples/xterm-a11y/assets/xterm/
+.tmp/

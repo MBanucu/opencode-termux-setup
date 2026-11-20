@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<link rel="stylesheet" href="xterm/xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #101418; overflow: hidden; }
+  #screen { width: 100%; height: 100%; padding: 0; box-sizing: border-box; }
+  .xterm .xterm-viewport { background: #101418 !important; }
+  .xterm .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<script src="xterm/xterm.js"></script>
+<script src="xterm/addon-fit.js"></script>
+<script>
+// A terminal for an accessibility test, not for a user: it prints a screen of
+// known text, then one more line a second - output arriving while nobody
+// touches the screen, which is the shape of the problem.
+//
+// The browser's writes are parsed asynchronously, so the buffer is read on a
+// later tick than the write; reading immediately after write() reports empty
+// lines and would make any accessibility measurement meaningless.
+(function () {
+  var screenReader = /[?&]sr=1/.test(window.location.search);
+  var fontPx = parseInt((window.location.search.match(/[?&]font=(\d+)/) || [])[1], 10);
+
+  function log(line) {
+    if (window.AndroidBridge) AndroidBridge.onLog(line);
+  }
+
+  var term = new Terminal({
+    theme: { background: '#101418', foreground: '#DCDCDC', cursor: '#DCDCDC' },
+    fontFamily: 'monospace',
+    fontSize: fontPx > 0 ? fontPx : 9,
+    convertEol: true,
+    screenReaderMode: screenReader,
+    scrollback: 500
+  });
+  var fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('screen'));
+  try { fit.fit(); } catch (e) { log('fit:' + e); }
+
+  term.writeln('terminal a11y sample');
+  term.writeln('PROMPT-MARKER $ run --help');
+  term.writeln('usage: sample [options]');
+  term.writeln('MARKER-ONE first output line');
+  term.writeln('MARKER-TWO second output line');
+
+  var tick = 0;
+  setInterval(function () {
+    tick++;
+    term.writeln('LIVE-' + tick + ' output arrived');
+  }, 1000);
+
+  /** Writes what the emulator's own buffer holds to the app, for the record. */
+  function sweep(why) {
+    var buffer = term.buffer.active;
+    var text = '';
+    var first = '';
+    for (var i = 0; i < buffer.length; i++) {
+      var line = buffer.getLine(i);
+      var row = line ? line.translateToString(true) : '';
+      if (!first && row.trim()) {
+        first = row;
+      }
+      text += row + '\n';
+    }
+    if (window.AndroidBridge) {
+      AndroidBridge.onScreen(text);
+      AndroidBridge.onLog(why + ': mode=' + (screenReader ? 'sr' : 'plain')
+        + ' rows=' + term.rows + ' cols=' + term.cols
+        + ' buffer=' + buffer.length + ' first=' + first);
+    }
+  }
+
+  setTimeout(function () { sweep('boot'); }, 800);
+  setInterval(function () { sweep('poll'); }, 1500);
+})();
+</script>
+</body>
+</html>
