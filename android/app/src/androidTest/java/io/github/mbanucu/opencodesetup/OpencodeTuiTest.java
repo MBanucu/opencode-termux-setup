@@ -58,6 +58,12 @@ import java.util.regex.Pattern;
  * moment, and {@code test/frames.py extract --names opencode-tui} produces the
  * PNG from that recording.
  *
+ * <p>It also tidies up after itself: the tab this run opens is closed with the
+ * leader key ({@code ctrl+x w}) and the TUI is exited ({@code ctrl+x q}), so a
+ * run does not add a tab to the next one's title bar. The session record
+ * outlives the tab; deleting it is a manual step because the TUI never reveals
+ * its id, and {@code ctrl+d} deletes only from inside the session list.
+ *
  * <p>Opt in, because it needs opencode installed on the device:
  * {@code bash test/local-build.sh --only io.github.mbanucu.opencodesetup.OpencodeTuiTest}
  */
@@ -129,36 +135,44 @@ public final class OpencodeTuiTest {
         }
 
         long started = events.length();
-        tap(device, "Open opencode", "the action that starts the TUI");
-        awaitPage(events, started, "TerminalActivity");
-        String shown = awaitScreen(screen, text -> visible(text) > 20);
+        boolean tuiOpen = false;
+        try {
+            tap(device, "Open opencode", "the action that starts the TUI");
+            awaitPage(events, started, "TerminalActivity");
+            tuiOpen = true;
+            String shown = awaitScreen(screen, text -> visible(text) > 20);
 
-        assertFalse("opencode is not installed, so no TUI could be drawn: install it first",
-                shown.contains("command not found"));
-        int columns = awaitColumns(events, started);
-        assertTrue("the page gave the PTY " + columns + " columns, and opencode drops its"
-                        + " footer below " + TUI_COLUMNS + ": the TUI is being drawn at a"
-                        + " check's font instead of the one \"Open opencode\" asks for",
-                columns >= TUI_COLUMNS);
+            assertFalse("opencode is not installed, so no TUI could be drawn: install it first",
+                    shown.contains("command not found"));
+            int columns = awaitColumns(events, started);
+            assertTrue("the page gave the PTY " + columns + " columns, and opencode drops its"
+                            + " footer below " + TUI_COLUMNS + ": the TUI is being drawn at a"
+                            + " check's font instead of the one \"Open opencode\" asks for",
+                    columns >= TUI_COLUMNS);
 
-        // The keyboard is wired to the PTY on this page only, so this also says
-        // the page a user reaches is the one that can be typed into.
-        typeIntoTheTui(device, SHELL_INPUT);
-        String ran = awaitScreen(screen, text -> text.contains(SHELL_OUTPUT));
+            // The keyboard is wired to the PTY on this page only, so this also says
+            // the page a user reaches is the one that can be typed into.
+            typeIntoTheTui(device, SHELL_INPUT);
+            String ran = awaitScreen(screen, text -> text.contains(SHELL_OUTPUT));
 
-        // Leave the text behind whether it passed or not, and mark the second in
-        // the recording where the TUI was on screen: a frame can be extracted
-        // from it with test/frames.py when somebody wants to look.
-        TestMilestones.mark("opencode-tui");
-        try (java.io.FileOutputStream out = new java.io.FileOutputStream(
-                new File(context.getExternalFilesDir(null), "tui-screen.txt"))) {
-            out.write(ran.getBytes(StandardCharsets.UTF_8));
+            // Leave the text behind whether it passed or not, and mark the second in
+            // the recording where the TUI was on screen: a frame can be extracted
+            // from it with test/frames.py when somebody wants to look.
+            TestMilestones.mark("opencode-tui");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(
+                    new File(context.getExternalFilesDir(null), "tui-screen.txt"))) {
+                out.write(ran.getBytes(StandardCharsets.UTF_8));
+            }
+
+            assertFalse("the terminal interpreted the escapes instead of printing them",
+                    shown.contains("\u001b["));
+            assertTrue("the TUI drew text, not just blank cells: it had " + visible(shown)
+                    + " visible characters", visible(shown) > 20);
+        } finally {
+            if (tuiOpen) {
+                leaveTheTui(device, screen, context);
+            }
         }
-
-        assertFalse("the terminal interpreted the escapes instead of printing them",
-                shown.contains("\u001b["));
-        assertTrue("the TUI drew text, not just blank cells: it had " + visible(shown)
-                + " visible characters", visible(shown) > 20);
     }
 
     /** Characters that are not whitespace: a screen of blank cells is not a TUI. */
@@ -190,11 +204,7 @@ public final class OpencodeTuiTest {
      * which is why this cannot be checked by opening the terminal around it.
      */
     private static void typeIntoTheTui(UiDevice device, String line) throws Exception {
-        UiObject2 terminal = device.wait(Until.findObject(By.clazz("android.webkit.WebView")), SHORT);
-        assertNotNull("the terminal is not on screen, so there is nothing to type into", terminal);
-        // Focus lands on the terminal's own input; a keystroke has nowhere to go
-        // otherwise.
-        terminal.click();
+        focusTerminal(device);
         // "!" puts the TUI in shell mode, and it has to be a press of its own:
         // shift+1 is a combination only keycombination can hold, and sent as
         // committed text it is pasted into the prompt without the mode change.
@@ -208,6 +218,80 @@ public final class OpencodeTuiTest {
             keys.append(' ').append(KeyEvent.KEYCODE_A + (key - 'a'));
         }
         device.executeShellCommand(keys.append(' ').append(KeyEvent.KEYCODE_ENTER).toString());
+    }
+
+    /** Puts the cursor in the terminal, so a keystroke has somewhere to land. */
+    private static void focusTerminal(UiDevice device) {
+        UiObject2 terminal = device.wait(Until.findObject(By.clazz("android.webkit.WebView")), SHORT);
+        assertNotNull("the terminal is not on screen, so there is nothing to type into", terminal);
+        terminal.click();
+    }
+
+    /**
+     * Closes this run's session tab and exits the TUI.
+     *
+     * <p>opencode creates a session when the TUI opens and keeps it after the
+     * tab is closed. The tab is the part that accumulates in the title bar of
+     * every later run, so leader {@code w} closes it here; leader {@code q} then
+     * exits, which also ends the command page instead of leaving a TUI behind.
+     * The session record stays: the TUI never shows its id, and {@code ctrl+d}
+     * is {@code session_delete} only inside the session list while it is
+     * {@code app_exit} in the composer.
+     */
+    private static void leaveTheTui(UiDevice device, File screen, Context context) {
+        try {
+            UiObject2 terminal = device.findObject(By.clazz("android.webkit.WebView"));
+            if (terminal == null) {
+                Diagnostics.log(context, "tui: nothing to close");
+                return;
+            }
+            terminal.click();
+            leader(device, KeyEvent.KEYCODE_W);
+            Diagnostics.log(context, "tui: close tab");
+            device.waitForIdle(500);
+            leader(device, KeyEvent.KEYCODE_Q);
+            Diagnostics.log(context, "tui: exit");
+            boolean gone = awaitExit(screen, 10_000);
+            Diagnostics.log(context, gone ? "tui: exit seen" : "tui: exit not seen");
+        } catch (Exception failed) {
+            // Cleanup is a courtesy: a failure here must not replace the result
+            // of what the test actually checked.
+            Diagnostics.log(context, "tui: cleanup failed: " + failed);
+        }
+    }
+
+    /**
+     * The leader, from its own presses.
+     *
+     * <p>Two separate shell calls: a merged {@code input} delivered no
+     * keystrokes at all on this device, and opencode has to see ctrl+x and then
+     * the key inside its leader timeout.
+     */
+    private static void leader(UiDevice device, int key) throws IOException {
+        device.executeShellCommand("input keycombination "
+                + KeyEvent.KEYCODE_CTRL_LEFT + " " + KeyEvent.KEYCODE_X);
+        device.executeShellCommand("input keyevent " + key);
+    }
+
+    /** True once the page has printed the command's exit line. */
+    private static boolean awaitExit(File screen, long timeout) {
+        long deadline = System.currentTimeMillis() + timeout;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                if (read(screen).contains("exit code")) {
+                    return true;
+                }
+            } catch (IOException unreadable) {
+                // The page may be rewriting it; look again.
+            }
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
     }
 
     /**

@@ -222,3 +222,29 @@ anchored to that element, so a hide aimed at the window alone leaves the keyboar
   `live-output.txt` (screen text as the page rendered it), `events.log`
   (`tail:{"cols":N}` and progress lines), `tui-screen.txt` (what a test wrote
   down), `last-result.txt` (the `check` answer, deleted before asking).
+
+## A TUI run leaves a session; close its tab, delete it by id
+
+Opening the TUI creates an opencode session. `ctrl+x w` is the leader `w`
+(`session.tab.close`): it closes the tab but keeps the session record, which is
+what `opencode session list` shows later. `OpencodeTuiTest` closes the tab it
+opened and exits with `ctrl+x q`, so a run cannot add a tab to the next run's
+title bar. It does not delete the session: the TUI never shows the id, and
+`ctrl+d` is `session_delete` inside the session list but `app_exit` in the
+composer, so pressing it blind can quit the app or hit a session that was
+already there.
+
+There is no ephemeral mode yet (upstream issue #53921); `opencode run
+--archived` keeps scripted `run` sessions out of the lists, but not the TUI.
+
+To remove the records by hand, on the device:
+
+```bash
+opencode session list --format json    # ids, newest first
+opencode session delete ses_...        # one id; its child sessions go too
+```
+
+The leader is two real presses, so send it as two separate `adb shell input`
+calls - `input keycombination 113 52` then `input keyevent 51` for `w`. A merged
+call delivered no keystrokes at all on this device, the same trap the `!` in
+`OpencodeTuiTest` records.
