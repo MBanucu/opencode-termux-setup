@@ -99,10 +99,15 @@ else's change is the normal state of this repo, not permission to bundle.
 ## Environment facts this device has
 
 - adb connects over TCP at `127.0.0.1:<port>`, and the port changes between
-  sessions. `service.adb.tcp.port` is empty and `/proc/net/tcp` is unreadable
-  for this user, so the way to find it is scanning localhost for a listening
-  port (`1080`, `5037`, `38109`, `52031`, `52744`, `59914` were open on this
-  machine); `adb mdns` is not supported.
+  sessions. `python3 test/adb-connect.py` finds it over mDNS - the phone
+  advertises `_adb-tls-connect._tcp` - and connects; `--pair` prints the
+  `adb pair` line. Termux's adb has no mDNS of its own (`adb mdns services`
+  answers "not supported"), and `ss`, `/proc/net/tcp6` and
+  `service.adb.tcp.port` are closed to an app, which is why the lookup uses
+  python-zeroconf instead.
+- That advertisement outlives the setting: with Wireless debugging off, mDNS
+  still names the last port (38135 on one run here) and every address answers
+  "connection refused". A refusal, not silence, is what "off" looks like.
 - Termux is `com.termux` with prefix `/data/data/com.termux/files/usr`; opencode
   is 2.3.2 and its TUI is the only thing in this repo that never exits.
 - The app's evidence, all under
