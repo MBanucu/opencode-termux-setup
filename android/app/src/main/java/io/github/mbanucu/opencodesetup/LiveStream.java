@@ -9,6 +9,8 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 /**
@@ -30,6 +32,13 @@ final class LiveStream {
 
     /** The one connection Termux made; input goes back out on it. */
     private volatile Socket connection;
+
+    /** One writer thread, so keys reach the command in the order they arrived. */
+    private final ExecutorService writer = Executors.newSingleThreadExecutor(work -> {
+        Thread thread = new Thread(work, "termux-input");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /**
      * Opens a port on the loopback address and streams what arrives to
@@ -64,11 +73,19 @@ final class LiveStream {
         if (live == null || bytes == null || bytes.length == 0) {
             return;
         }
+        // A footer key is pressed on the UI thread, and a socket write there is
+        // StrictMode's NetworkOnMainThreadException: the page crashed the first
+        // time the slash key was tapped. The clone is because a key's array is a
+        // constant the caller may use again before this thread runs.
+        byte[] copy = bytes.clone();
+        writer.execute(() -> write(live, copy));
+    }
+
+    /** Writes one key's bytes, off the UI thread. */
+    private void write(Socket live, byte[] bytes) {
         try {
-            synchronized (this) {
-                live.getOutputStream().write(bytes);
-                live.getOutputStream().flush();
-            }
+            live.getOutputStream().write(bytes);
+            live.getOutputStream().flush();
         } catch (IOException gone) {
             // The command exited between the key and the write; the result
             // still comes back through the receiver.
