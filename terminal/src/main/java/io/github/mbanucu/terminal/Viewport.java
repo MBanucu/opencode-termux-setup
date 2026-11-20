@@ -108,6 +108,18 @@ final class Viewport {
         return screen.background(history - screen.historyRows(), col);
     }
 
+    /** True when the visible row continues on the next one. */
+    boolean wrapped(int row) {
+        if (screen.isAlternate()) {
+            return screen.wrapped(row);
+        }
+        int history = historyRow(row);
+        if (history >= 0 && history < screen.historyRows()) {
+            return screen.historyWrapped(history);
+        }
+        return screen.wrapped(history - screen.historyRows());
+    }
+
     /** The combined row index at the top of the view. */
     private int historyRow(int row) {
         return screen.historyRows() - offset + row;

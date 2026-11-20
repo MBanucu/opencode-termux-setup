@@ -19,6 +19,7 @@ comparison with xterm.js in a WebView, is
 | `HistoryRow` | one row of primary-screen scrollback, with the colours of its cells. Package-private |
 | `AnsiPalette` | the 16-colour palette, the 256-colour cube and bold brightening. Package-private |
 | `Viewport` | the window over the history and the live grid: scroll offset, clamping, follow-at-bottom. Package-private |
+| `Selection` | an inclusive cell range over the viewport, and the text it copies with hard breaks kept and wrapped rows joined. Package-private |
 | `TerminalAccessibility` | the row and prompt nodes, their events, and the announcement timer. Package-private |
 
 `TerminalView` loads `terminal-mono.ttf` from the host app's assets when present —
@@ -87,8 +88,9 @@ visibility),
 including escapes split across two `feed` calls. The viewport checks cover
 scrolling into history, clamping at both ends, output while scrolled back not
 moving the row being read, the alternate screen resetting the view, `ED 3`, and
-a 3000-line history. They need no device, no Gradle and no test framework,
-because the grid and the viewport are plain Java. The view itself needs a device
+a 3000-line history. The selection checks cover inclusive ranges, backwards
+drags, hard breaks versus wrapped rows, scrollback and clamping. They need no
+device, no Gradle and no test framework, because the models are plain Java. The view itself needs a device
 and is covered by `samples/e2e.sh`.
 
 ## What it is not
@@ -96,8 +98,9 @@ and is covered by `samples/e2e.sh`.
 - **Not a VT emulator.** `SGR` foreground and background colour are drawn — 16,
   256 and truecolor, with `1` brightening a palette foreground — but underline,
   reverse and the rest are dropped. It keeps a primary-screen scrollback (the
-  alternate screen is the program's own), but has no selection, copy, mouse or
-  bracketed-paste state. Enough to draw a TUI and read it; not enough to be
+  alternate screen is the program's own) and a cell-range selection model that
+  copies hard breaks and wrapped rows correctly, but it has no long-press
+  handles, clipboard wiring, mouse or bracketed-paste state. Enough to draw a TUI and read it; not enough to be
   someone's daily terminal without more work.
 - **Not a transport.** An app-owned `forkpty` pty and Termux's `RUN_COMMAND` session
   are both in the sample, and both are the caller's business. The size callback is the

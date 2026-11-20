@@ -1,8 +1,6 @@
 package io.github.mbanucu.terminal;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 
 /**
  * A character grid: the part of a terminal that makes a full-screen program
@@ -67,9 +65,7 @@ final class Screen {
     private int scrollTop;
     private int scrollBottom;
     /** Rows scrolled off the top of the primary screen, oldest first. */
-    private final List<HistoryRow> history = new ArrayList<>();
-    /** How many such rows to keep; zero disables scrollback. */
-    private final int historyLimit;
+    private final Scrollback scrollback;
 
     Screen(int cols, int rows) {
         this(cols, rows, DEFAULT_HISTORY_LINES);
@@ -78,7 +74,7 @@ final class Screen {
     Screen(int cols, int rows, int historyLines) {
         this.cols = cols;
         this.rows = rows;
-        this.historyLimit = Math.max(0, historyLines);
+        this.scrollback = new Scrollback(historyLines);
         main = blank();
         alt = blank();
         mainFg = blankColours();
@@ -109,9 +105,7 @@ final class Screen {
         if (newCols < 2 || newRows < 1 || (newCols == cols && newRows == rows)) {
             return;
         }
-        for (int i = 0; i < history.size(); i++) {
-            history.set(i, history.get(i).resize(newCols));
-        }
+        scrollback.resize(newCols);
         main = copy(main, cols, rows, newCols, newRows);
         alt = copy(alt, cols, rows, newCols, newRows);
         mainFg = copyColours(mainFg, cols, rows, newCols, newRows);
@@ -226,9 +220,9 @@ final class Screen {
             return text();
         }
         StringBuilder all = new StringBuilder();
-        for (HistoryRow row : history) {
-            all.append(row.text());
-            if (!row.wrapped()) {
+        for (int row = 0; row < scrollback.size(); row++) {
+            all.append(scrollback.line(row));
+            if (!scrollback.wrapped(row)) {
                 all.append('\n');
             }
         }
@@ -238,31 +232,22 @@ final class Screen {
 
     /** How many rows have scrolled off the top of the primary screen. */
     int historyRows() {
-        return history.size();
+        return scrollback.size();
     }
 
     /** One history row, oldest first, without its trailing blanks. */
     String historyLine(int row) {
-        if (row < 0 || row >= history.size()) {
-            return "";
-        }
-        return history.get(row).text();
+        return scrollback.line(row);
     }
 
     /** The foreground of one history cell: 0xRRGGBB, or 0 for the default. */
     int historyForeground(int row, int col) {
-        if (row < 0 || row >= history.size()) {
-            return 0;
-        }
-        return history.get(row).foreground(col);
+        return scrollback.foreground(row, col);
     }
 
     /** The background of one history cell: 0xRRGGBB, or 0 for the default. */
     int historyBackground(int row, int col) {
-        if (row < 0 || row >= history.size()) {
-            return 0;
-        }
-        return history.get(row).background(col);
+        return scrollback.background(row, col);
     }
 
     /** True when the row continues on the next one because it filled the width. */
@@ -272,7 +257,7 @@ final class Screen {
 
     /** True when a history row continued on the next one. */
     boolean historyWrapped(int row) {
-        return row >= 0 && row < history.size() && history.get(row).wrapped();
+        return scrollback.wrapped(row);
     }
 
     /** True while the program is on the alternate screen, i.e. a full-screen app. */
@@ -734,14 +719,8 @@ final class Screen {
 
     /** Copies the top row into history before a full-screen scroll consumes it. */
     private void rememberTopRow() {
-        if (historyLimit == 0) {
-            return;
-        }
-        history.add(new HistoryRow(cells[scrollTop].clone(), colours[scrollTop].clone(),
+        scrollback.add(new HistoryRow(cells[scrollTop].clone(), colours[scrollTop].clone(),
                 backgrounds[scrollTop].clone(), wrapped[scrollTop]));
-        while (history.size() > historyLimit) {
-            history.remove(0);
-        }
     }
 
     private void scrollDown(int count) {
@@ -769,7 +748,7 @@ final class Screen {
             // ED 3 is xterm's "clear scrollback", not "clear screen": the
             // visible grid stays, which is what a program that clears its
             // scrollback without redrawing relies on.
-            history.clear();
+            scrollback.clear();
             return;
         }
         if (mode == 2) {

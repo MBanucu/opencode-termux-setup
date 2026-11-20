@@ -66,6 +66,8 @@ file named for it:
 - [x] `Viewport` — the window over history and the live grid.
 - [x] `HistoryRow` — one stored history row and its colours.
 - [x] `AnsiPalette` — the 16-colour palette, the 256 cube and bold brightening.
+- [x] `Selection` — an inclusive viewport cell range and the text it copies,
+  joining wrapped rows.
 - [x] `TerminalAccessibility` — row nodes, the prompt node, events and the
   announcement timer.
 - [x] `Screen.csi` splits into private-mode handling (`applyModes`) and the
@@ -129,12 +131,17 @@ row into history and through resizes and line edits.
 
 ### 1.2 Selection and copy
 
-- [ ] A cell-range selection model across the visible grid and history.
+Model state: inclusive viewport ranges, backwards drags, wrapped joins,
+scrollback mapping and clamping are covered by `SelectionTest`; the long-press
+UI, clipboard and resize test remain.
+
+- [x] A cell-range selection model across the visible grid and history.
 - [ ] Long-press word/line selection, drag handles, and a copy action.
 - [ ] Keep the existing whole-screen copy key (`copy all`) as a separate action.
 - [ ] Clipboard integration and a clear visual selection; no link handling
   unless the xterm page already offers it.
-- [ ] Tests for selection across wraps, scrollback and a resize.
+- [ ] A test for selection across a resize, and an instrumented long-press
+  test on a device.
 
 ### 1.3 Key encoding
 
