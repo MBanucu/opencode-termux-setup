@@ -43,10 +43,11 @@ START=$SECONDS
 CHECKS_RUN=0
 CHECKS="pty cursor cursor-escapes colour tui tui-echo tui-caret tui-blink tui-bg tui-symbols tui-modes resize rows session session-resize opencode"
 FAIL=0
+FAIL_COUNT=0
 
 say() { printf '%s\n' "$*"; }
 ok() { [ "$QUIET" = 1 ] || say "ok   $*"; }
-bad() { say "FAIL $*"; FAIL=1; }
+bad() { say "FAIL $*"; FAIL=1; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
 device() { $ADB "$@"; }
 
@@ -80,6 +81,9 @@ ensure_device() {
 
 here=$(cd "$(dirname "$0")" && pwd)
 STATE_FILE=$here/out/device-state.txt
+RUN_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+TIMING_LOG=$here/out/e2e-timings.log
+: > "$TIMING_LOG"
 SAVED_SIZE=""
 SAVED_SERVICES=""
 SAVED_ACCESSIBILITY=""
@@ -241,16 +245,45 @@ enable_probe() {
 evidence() { device shell "cat $FILES/evidence.txt" 2>/dev/null; }
 probe_file() { device shell "cat $PROBE_FILES/$1.txt" 2>/dev/null; }
 
+# The probe walks the target window and writes the summary itself; the suite only
+# reads values such as rows= and prompt.actions=.
+inspect() {
+    device shell "am broadcast -p $PROBE -a $PROBE.COMMAND --es pkg $APP \
+        --es inspect '$1' >/dev/null 2>&1; cat $PROBE_FILES/$1.txt" 2>/dev/null
+}
+
+# Waits for an accessibility event without polling: the probe blocks on a new
+# event off its main thread, and this streams the answer file until the match.
+# $1 needle, $2 seconds, $3 optional event type (WINDOW_STATE, ANNOUNCEMENT...).
+wait_event() {
+    local needle=$1 seconds=${2:-15} type=${3:-}
+    timeout "$seconds" "$ADB" shell ": > '$PROBE_FILES/wait.txt'; \
+        am broadcast -p $PROBE -a $PROBE.COMMAND --es wait '$needle' \
+            --el waitMs $((seconds * 1000))${type:+ --es event $type} >/dev/null 2>&1; \
+        tail -n +1 -f '$PROBE_FILES/wait.txt' | grep -q -m1 '^matched'"
+}
+
+# Sets text and waits for the accessibility event the action causes, all in one
+# adb shell: the wait is armed first, then the action runs, then the answer file
+# is streamed until it matches. The probe does the matching, off its main thread.
+type_wait() { # text needle seconds
+    local text=$1 needle=$2 seconds=${3:-12}
+    timeout "$seconds" "$ADB" shell ": > '$PROBE_FILES/wait.txt'; \
+        am broadcast -p $PROBE -a $PROBE.COMMAND --es wait '$needle' \
+            --el waitMs $((seconds * 1000)) >/dev/null 2>&1; \
+        am broadcast -p $PROBE -a $PROBE.COMMAND --es pkg $APP \
+            --es text '$text\\n' >/dev/null 2>&1; \
+        tail -n +1 -f '$PROBE_FILES/wait.txt' | grep -q -m1 '^matched'"
+}
+
 # The service writes status.txt when it binds; nothing it performs works before
 # that, and a reinstall or a settings change both unbind it.
 await_probe() {
-    local tries=${1:-20} i=0
-    while [ "$i" -lt "$tries" ]; do
-        probe_file status | grep -q 'connected' && return 0
-        sleep 1
-        i=$((i + 1))
-    done
-    return 1
+    local tries=${1:-45}
+    # grep runs on the device: when it matches, the shell pipeline ends and the
+    # adb call returns, instead of staying open until the host timeout.
+    timeout "$tries" "$ADB" shell "touch '$PROBE_FILES/status.txt'; \
+        tail -n +1 -F '$PROBE_FILES/status.txt' | grep -q -m1 connected"
 }
 
 # Types one line into the app's own window the way a service does, and waits for
@@ -398,33 +431,40 @@ has_line() {
     printf '%s\n' "$1" | grep -qxF -- "$2"
 }
 
+# Installs only when the on-device APK differs, so an unchanged probe keeps its
+# accessibility binding instead of paying the rebind time on every run.
+install_if_changed() { # apk package label
+    local apk=$1 package=$2 label=$3 remote hash local_hash
+    remote=$(device shell pm path "$package" 2>/dev/null | tr -d '\r' | sed -n 's/^package://p')
+    if [ -n "$remote" ]; then
+        hash=$(device shell md5sum "$remote" 2>/dev/null | awk '{print $1}' | tr -d '\r')
+    fi
+    local_hash=$(md5sum "$apk" 2>/dev/null | awk '{print $1}')
+    if [ -z "$hash" ] || [ "$hash" != "$local_hash" ]; then
+        device install -r "$apk" >/dev/null 2>&1 || {
+            bad "$label did not install; build it first"
+            return 1
+        }
+    fi
+}
+
 install_everything() {
     save_device_state
-    device install -r "$APK" >/dev/null 2>&1 || {
-        bad "the native-terminal APK did not install; build it first"
-        exit 1
-    }
-    device install -r "$PROBE_APK" >/dev/null 2>&1 || {
-        bad "the a11y-probe APK did not install; build it first"
-        exit 1
-    }
+    install_if_changed "$APK" "$APP" "the native-terminal APK" || exit 1
+    install_if_changed "$PROBE_APK" "$PROBE" "the a11y-probe APK" || exit 1
     # Reinstalling the probe kills its service, and the settings below only ask
     # for it back: the actions go nowhere until it has bound. Old logs would also
     # let a later check match a line from a previous run.
-    device shell rm -f "$PROBE_FILES/status.txt" "$PROBE_FILES/actions.txt" >/dev/null 2>&1
-    # A service bound before a settings change can keep an instance whose window
-    # connection is empty (windows=0, active=none) while the setting says it is
-    # on; a fresh process binds a fresh connection.
-    device shell am force-stop "$PROBE" >/dev/null 2>&1
-    sleep 1
+    device shell rm -f "$PROBE_FILES/actions.txt" "$PROBE_FILES/wait.txt" >/dev/null 2>&1
+    # Reinstalling the APK already replaces the process; force-stopping an
+    # accessibility service here makes the manager take tens of seconds to bind
+    # it again. A fresh install gets the fresh window connection instead.
+    device logcat -c >/dev/null 2>&1
     # Appended, not substituted: a reader the owner had on keeps working while
     # the probe drives the app, and the saved value puts the list back untouched.
     enable_probe
-    if ! await_probe 20; then
-        bad "the probe service never connected"
-    fi
-    if ! await_windows 12; then
-        bad "the probe service connected but sees no windows"
+    if ! await_windows 30; then
+        bad "the probe service never exposed a window"
     fi
 }
 
@@ -445,9 +485,10 @@ launch() {
 }
 
 dump() {
-    device shell am broadcast -p "$PROBE" -a "$PROBE.COMMAND" --es dump "$1" >/dev/null 2>&1
-    sleep 2
-    probe_file "$1"
+    # am broadcast waits for the receiver, so the file is complete when cat runs;
+    # one adb round trip instead of broadcast-then-read.
+    device shell "am broadcast -p $PROBE -a $PROBE.COMMAND --es pkg $APP \
+        --es dump '$1' >/dev/null 2>&1; cat $PROBE_FILES/$1.txt" 2>/dev/null
 }
 
 restore() {
@@ -651,7 +692,7 @@ test_tui_renders_and_responds() {
     else
         bad "tui: 't' was not processed"
     fi
-    evidence | grep -aqF '[x] two' \
+    await '[x] two' 2 \
         && ok "tui: 't' marked the selected row" \
         || bad "tui: the toggle did not show"
 
@@ -1017,18 +1058,42 @@ test_session_resize_follows_the_view() {
 # --- what a service can read --------------------------------------------------
 
 test_rows_and_events() {
-    local tree rows changed announced
-    tree=$(dump e2e-rows)
-    rows=$(printf '%s\n' "$tree" | grep -acE 'android.widget.TextView editable=false focusable=true')
-    changed=$(printf '%s\n' "$tree" | grep -ac 'CONTENT_CHANGED')
-    announced=$(printf '%s\n' "$tree" | grep -ac 'ANNOUNCEMENT')
+    launch
+    local summary rows changed announced actions needle
+    summary=$(inspect e2e-rows)
+    rows=$(printf '%s\n' "$summary" | sed -n 's/^rows=//p')
+    changed=$(printf '%s\n' "$summary" | sed -n 's/^events\.CONTENT_CHANGED=//p')
+    announced=$(printf '%s\n' "$summary" | sed -n 's/^events\.ANNOUNCEMENT=//p')
+    actions=$(printf '%s\n' "$summary" | sed -n 's/^prompt\.actions=//p')
 
-    [ "$rows" -ge 5 ] && ok "rows: a service can read $rows row nodes" \
-        || bad "rows: only $rows row nodes in the tree"
-    [ "$changed" -gt 0 ] && ok "events: $changed content-changed events" \
+    [ "${rows:-0}" -ge 5 ] && ok "rows: the probe's own summary counts $rows row nodes" \
+        || bad "rows: only ${rows:-0} row nodes in the summary"
+    [ "${changed:-0}" -gt 0 ] && ok "events: $changed content-changed events" \
         || bad "events: no TYPE_WINDOW_CONTENT_CHANGED reached the service"
-    [ "$announced" -gt 0 ] && ok "events: $announced announcements" \
+    [ "${announced:-0}" -gt 0 ] && ok "events: $announced announcements" \
         || bad "events: no TYPE_ANNOUNCEMENT reached the service"
+    case "$actions" in
+        *SET_TEXT*) ok "a11y: the prompt exposes ACTION_SET_TEXT ($actions)" ;;
+        *) bad "a11y: the prompt does not expose ACTION_SET_TEXT (got '$actions')" ;;
+    esac
+
+    # TalkBack's swipe, performed by the service; the probe chooses the row.
+    device shell "am broadcast -p $PROBE -a $PROBE.COMMAND --es pkg $APP \
+        --ez focusRow true" >/dev/null 2>&1
+    if probe_file actions | grep -aq 'A11Y_FOCUS_FIRST .* -> true'; then
+        ok "a11y: ACTION_ACCESSIBILITY_FOCUS focused a terminal row"
+    else
+        bad "a11y: the focus action did not succeed (got: $(probe_file actions | grep A11Y_FOCUS_FIRST | tail -1))"
+        return
+    fi
+    summary=$(inspect e2e-focus)
+    focused=$(printf '%s\n' "$summary" | sed -n 's/^focusedA11y=//p')
+    changed=$(printf '%s\n' "$summary" | sed -n 's/^events\.A11Y_FOCUSED=//p')
+    if [ -n "$focused" ] && [ "$focused" != "-" ] && [ "${changed:-0}" -gt 0 ]; then
+        ok "a11y: the service reads the focused row back ('$focused')"
+    else
+        bad "a11y: accessibility focus was not visible to the service (focused '$focused', events '${changed:-0}')"
+    fi
 }
 
 # --- a Termux session, driven through accessibility ---------------------------
@@ -1175,10 +1240,22 @@ check() {
     if [ -n "$ONLY" ] && ! wanted "$name"; then
         return 0
     fi
-    local started=$SECONDS
+    local started=$SECONDS before=$FAIL_COUNT seconds
     CHECKS_RUN=$((CHECKS_RUN + 1))
     "$@"
-    say "  ($name: $((SECONDS - started))s)"
+    seconds=$((SECONDS - started))
+    say "  ($name: ${seconds}s)"
+    # The log line test/timings.py already knows: class#test duration outcome.
+    printf 'timing: samples.e2e#%s %dms %s\n' "$name" "$((seconds * 1000))" \
+        "$([ "$FAIL_COUNT" = "$before" ] && echo passed || echo failed)" >> "$TIMING_LOG"
+}
+
+# Records this run in the suite's existing timing database.
+record_run() {
+    [ -s "$TIMING_LOG" ] || return 0
+    python3 "$here/../test/timings.py" record --log "$TIMING_LOG" \
+        --run "$RUN_STARTED" --db "$here/../test/.timings.db" >/dev/null 2>&1 \
+        || say "WARNING: could not record this run in test/.timings.db"
 }
 
 if [ "$ONLY" = opencode ]; then
@@ -1207,12 +1284,16 @@ done
 
 if ! ensure_device; then
     say "FAIL no device reachable, and mDNS did not name a working port"
+    FAIL=1
+    record_run
     exit 1
 fi
 
 # A dead run never reached its trap; repair what it left before changing more.
 if ! recover_previous_run; then
     say "FAIL the previous run's device state could not be restored; not starting"
+    FAIL=1
+    record_run
     exit 1
 fi
 
@@ -1240,7 +1321,9 @@ fi
 
 if [ "$FAIL" = 0 ]; then
     say "PASS $CHECKS_RUN checks in $((SECONDS - START))s"
+    record_run
 else
     say "FAILURES after $((SECONDS - START))s"
+    record_run
     exit 1
 fi

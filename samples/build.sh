@@ -29,6 +29,23 @@ for tool in aapt2 d8 zipalign apksigner javac clang python3; do
     command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 
+app=${1:-}
+case "$app" in
+    all)
+        shift
+        bash "$here/build.sh" native-terminal
+        exec bash "$here/build.sh" a11y-probe "$@"
+        ;;
+    test|--test)
+        shift
+        bash "$here/build.sh" native-terminal
+        bash "$here/build.sh" a11y-probe
+        echo "== terminal: JVM suite"
+        bash "$root/terminal/test.sh"
+        echo "== samples: device e2e"
+        exec bash "$here/e2e.sh" "$@"
+        ;;
+esac
 app=${1:?usage: build.sh <app directory>}
 dir=$here/$app
 [ -f "$dir/AndroidManifest.xml" ] || { echo "no $dir/AndroidManifest.xml" >&2; exit 1; }

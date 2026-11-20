@@ -45,7 +45,20 @@ public final class ProbeService extends AccessibilityService {
     /** When set, actions go to this package's window instead of the active one. */
     private static volatile String targetPackage;
 
-    private final Deque<String> events = new ArrayDeque<>();
+    private final Object eventLock = new Object();
+    private long nextEventSeq;
+    private final Deque<Event> events = new ArrayDeque<>();
+
+    /** One heard event, with the sequence number a wait matches against. */
+    private static final class Event {
+        final long seq;
+        final String line;
+
+        Event(long seq, String line) {
+            this.seq = seq;
+            this.line = line;
+        }
+    }
 
     static File files() {
         ProbeService service = instance;
@@ -69,11 +82,15 @@ public final class ProbeService extends AccessibilityService {
         if (packageName.startsWith("io.github.mbanucu.samples.a11yprobe")) {
             return;
         }
-        events.addLast(packageName + " " + eventType(event.getEventType())
+        String line = packageName + " " + eventType(event.getEventType())
                 + " " + event.getClassName() + " text=" + event.getText()
-                + " desc=" + event.getContentDescription());
-        while (events.size() > MAX_EVENTS) {
-            events.removeFirst();
+                + " desc=" + event.getContentDescription();
+        synchronized (eventLock) {
+            events.addLast(new Event(++nextEventSeq, line));
+            while (events.size() > MAX_EVENTS) {
+                events.removeFirst();
+            }
+            eventLock.notifyAll();
         }
     }
 
@@ -104,9 +121,11 @@ public final class ProbeService extends AccessibilityService {
         }
         StringBuilder out = new StringBuilder();
         out.append("package=").append(service.getPackageName()).append('\n');
-        out.append("events(").append(service.events.size()).append(") newest last:\n");
-        for (String event : service.events) {
-            out.append("  ").append(event).append('\n');
+        synchronized (service.eventLock) {
+            out.append("events(").append(service.events.size()).append(") newest last:\n");
+            for (Event event : service.events) {
+                out.append("  ").append(event.line).append('\n');
+            }
         }
         List<AccessibilityWindowInfo> windows = service.getWindows();
         AccessibilityNodeInfo active = service.getRootInActiveWindow();
@@ -176,6 +195,12 @@ public final class ProbeService extends AccessibilityService {
         return flat.length() > 160 ? flat.substring(0, 160) + "…(" + flat.length() + ")" : flat;
     }
 
+    private static String bounds(AccessibilityNodeInfo node) {
+        Rect bounds = new Rect();
+        node.getBoundsInScreen(bounds);
+        return bounds.left + "," + bounds.top + "," + bounds.right + "," + bounds.bottom;
+    }
+
     private static String actionNames(AccessibilityNodeInfo node) {
         StringBuilder names = new StringBuilder();
         for (AccessibilityNodeInfo.AccessibilityAction action : node.getActionList()) {
@@ -200,6 +225,200 @@ public final class ProbeService extends AccessibilityService {
             case AccessibilityNodeInfo.ACTION_LONG_CLICK: return "LONG_CLICK";
             case AccessibilityNodeInfo.ACTION_SELECT: return "SELECT";
             default: return "action-" + id;
+        }
+    }
+
+    /**
+     * Waits for a new accessibility event containing the needle, optionally
+     * restricted to one event type.
+     *
+     * <p>Call this off the main thread: {@link #onAccessibilityEvent} is
+     * delivered there, so blocking the main thread would wait forever for the
+     * event that cannot be delivered.
+     */
+    static String waitFor(String needle, String type, long timeoutMs, long start) {
+        ProbeService service = instance;
+        if (service == null) {
+            return "probe service is not running\n";
+        }
+        long timeout = Math.max(0, Math.min(timeoutMs, 9000));
+        long deadline = System.currentTimeMillis() + timeout;
+        synchronized (service.eventLock) {
+            while (true) {
+                for (Event event : service.events) {
+                    if (event.seq <= start) {
+                        continue;
+                    }
+                    if ((needle == null || needle.isEmpty() || event.line.contains(needle))
+                            && (type == null || type.isEmpty() || event.line.contains(type))) {
+                        return "matched seq=" + event.seq + " " + event.line + "\n";
+                    }
+                }
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) {
+                    return "timeout after " + timeout + "ms for '" + needle + "'\n";
+                }
+                try {
+                    service.eventLock.wait(left);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return "interrupted\n";
+                }
+            }
+        }
+    }
+
+    /** Gives accessibility focus to the first terminal row, as TalkBack's swipe does. */
+    static String focusFirstRow() {
+        ProbeService service = instance;
+        if (service == null) {
+            return "A11Y_FOCUS_FIRST probe service is not running";
+        }
+        AccessibilityNodeInfo root = rootFor();
+        if (root == null) {
+            return "A11Y_FOCUS_FIRST no target window for "
+                    + (targetPackage == null ? "the active app" : targetPackage);
+        }
+        Deque<AccessibilityNodeInfo> pending = new ArrayDeque<>();
+        pending.add(root);
+        while (!pending.isEmpty()) {
+            AccessibilityNodeInfo node = pending.removeFirst();
+            if (isTerminalRow(node)) {
+                boolean focused = node.performAction(
+                        AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
+                String answer = "A11Y_FOCUS_FIRST " + quote(node.getText())
+                        + " -> " + focused;
+                write("actions.txt", answer + "\n");
+                root.recycle();
+                return answer;
+            }
+            for (int i = 0; i < node.getChildCount(); i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) {
+                    pending.addLast(child);
+                }
+            }
+        }
+        root.recycle();
+        return "A11Y_FOCUS_FIRST no terminal row";
+    }
+
+    /** The sequence number of the newest event, so a wait can ignore older ones. */
+    static long eventSeq() {
+        ProbeService service = instance;
+        if (service == null) {
+            return 0;
+        }
+        synchronized (service.eventLock) {
+            return service.nextEventSeq;
+        }
+    }
+
+    /**
+     * A compact summary of what a service can read in the target window: row
+     * texts and widths, the editable prompt and its actions, the node with
+     * accessibility focus, and event counts. The walking and counting happen
+     * here, so a test asserts on values rather than parsing a tree.
+     */
+    static String inspect(String name) {
+        ProbeService service = instance;
+        if (service == null) {
+            return "probe service is not running\n";
+        }
+        StringBuilder out = new StringBuilder();
+        out.append("package=").append(service.getPackageName()).append('\n');
+        List<AccessibilityWindowInfo> windows = service.getWindows();
+        out.append("windows=").append(windows == null ? 0 : windows.size()).append('\n');
+        AccessibilityNodeInfo root = rootFor();
+        int rows = 0;
+        if (root == null) {
+            out.append("root=none\n");
+        } else {
+            Deque<AccessibilityNodeInfo> pending = new ArrayDeque<>();
+            pending.add(root);
+            while (!pending.isEmpty()) {
+                AccessibilityNodeInfo node = pending.removeFirst();
+                if (node.isEditable()) {
+                    Rect bounds = new Rect();
+                    node.getBoundsInScreen(bounds);
+                    out.append("prompt.text=").append(quote(node.getText())).append('\n');
+                    out.append("prompt.editable=").append(node.isEditable()).append('\n');
+                    out.append("prompt.focusable=").append(node.isFocusable()).append('\n');
+                    out.append("prompt.focused=").append(node.isFocused()).append('\n');
+                    out.append("prompt.actions=").append(actionNames(node)).append('\n');
+                    out.append("prompt.bounds=").append(bounds.left).append(',').append(bounds.top)
+                            .append(',').append(bounds.right).append(',').append(bounds.bottom)
+                            .append('\n');
+                } else if (isTerminalRow(node)) {
+                    rows++;
+                    out.append("row.").append(rows).append('=').append(quote(node.getText()))
+                            .append('\n');
+                    out.append("rowwidth.").append(rows).append('=')
+                            .append(node.getText().length()).append('\n');
+                }
+                for (int i = 0; i < node.getChildCount(); i++) {
+                    AccessibilityNodeInfo child = node.getChild(i);
+                    if (child != null) {
+                        pending.addLast(child);
+                    }
+                }
+                node.recycle();
+            }
+        }
+        out.append("rows=").append(rows).append('\n');
+        AccessibilityNodeInfo focused =
+                service.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
+        out.append("focusedA11y=")
+                .append(focused == null ? "-" : quote(focused.getText())).append('\n');
+        if (focused != null) {
+            focused.recycle();
+        }
+        int total = 0;
+        int contentChanged = 0;
+        int announcements = 0;
+        int a11yFocused = 0;
+        synchronized (service.eventLock) {
+            total = service.events.size();
+            for (Event event : service.events) {
+                if (event.line.contains("CONTENT_CHANGED")) {
+                    contentChanged++;
+                }
+                if (event.line.contains("ANNOUNCEMENT")) {
+                    announcements++;
+                }
+                if (event.line.contains("A11Y_FOCUSED")) {
+                    a11yFocused++;
+                }
+            }
+        }
+        out.append("events.total=").append(total).append('\n');
+        out.append("events.CONTENT_CHANGED=").append(contentChanged).append('\n');
+        out.append("events.ANNOUNCEMENT=").append(announcements).append('\n');
+        out.append("events.A11Y_FOCUSED=").append(a11yFocused).append('\n');
+        writeReplace(name + ".txt", out.toString());
+        return "inspected " + name + ".txt (" + out.length() + " chars)";
+    }
+
+    /** A row of the terminal, rather than an ordinary label in the same window. */
+    private static boolean isTerminalRow(AccessibilityNodeInfo node) {
+        return "android.widget.TextView".contentEquals(node.getClassName())
+                && node.getText() != null && node.getText().length() > 0
+                && node.getActionList().contains(
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK);
+    }
+
+    /** Replaces a file, for a summary; {@link #write} appends for a log. */
+    static void writeReplace(String name, String body) {
+        File directory = files();
+        if (directory == null) {
+            Log.w(TAG, "no files dir for " + name);
+            return;
+        }
+        File file = new File(directory, name);
+        try (FileOutputStream out = new FileOutputStream(file, false)) {
+            out.write(body.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException failed) {
+            Log.w(TAG, "could not write " + file, failed);
         }
     }
 
@@ -272,6 +491,7 @@ public final class ProbeService extends AccessibilityService {
         while (!pending.isEmpty()) {
             AccessibilityNodeInfo node = pending.removeFirst();
             if (contains(node.getText(), wanted) || contains(node.getContentDescription(), wanted)
+                    || contains(node.getHintText(), wanted)
                     || contains(node.getViewIdResourceName(), wanted)) {
                 return node;
             }
@@ -364,7 +584,16 @@ public final class ProbeService extends AccessibilityService {
             return "no node matching " + find;
         }
         boolean focused = node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
-        String answer = "A11Y_FOCUS on " + node.getClassName() + " -> " + focused;
+        String answer = "A11Y_FOCUS on " + node.getClassName()
+                + " package=" + node.getPackageName()
+                + " visible=" + node.isVisibleToUser()
+                + " enabled=" + node.isEnabled()
+                + " actions=" + actionNames(node)
+                + " clickable=" + node.isClickable()
+                + " a11yFocused=" + node.isAccessibilityFocused()
+                + " id=" + node.getViewIdResourceName()
+                + " bounds=" + bounds(node)
+                + " -> " + focused;
         write("actions.txt", answer + "\n");
         node.recycle();
         return answer;
