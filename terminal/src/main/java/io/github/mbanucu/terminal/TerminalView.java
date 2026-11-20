@@ -162,6 +162,11 @@ public final class TerminalView extends View {
         this.sizeListener = listener;
     }
 
+    /** Where answers to a program's device queries go: the pty, usually. */
+    public void setReplySink(ReplySink sink) {
+        screen.setReplySink(sink);
+    }
+
     public void setAnnounceOutput(boolean announceOutput) {
         accessibility.setAnnounceOutput(announceOutput);
     }

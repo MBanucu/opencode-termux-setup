@@ -73,7 +73,7 @@ file named for it:
 - [x] `Screen.csi` splits into private-mode handling (`applyModes`) and the
   non-private dispatch (`dispatch`).
 - [x] `KeyEncoder` — named hardware keys and modified characters.
-- [ ] Keep query replies in `QueryReplies` when 1.4 adds its table.
+- [x] `ReplySink` — the caller's write path for query answers.
 
 ## Phase 0 — decide the shape
 
@@ -160,12 +160,15 @@ scripted-pty test remain.
 
 ### 1.4 Query replies
 
-- [ ] Add a reply sink from `Screen`/`TerminalView` to the caller (the PTY).
-- [ ] Reply to the sequences the page currently relies on: DA1/DA2, DSR/CPR,
-  XTVERSION, OSC 10/11 colours, the kitty keyboard query, and the DCS termcap
-  question.
-- [ ] Do not reply when the program did not ask; avoid reply loops.
-- [ ] Tests for each reply, including escapes split across feeds.
+- [x] Add a reply sink from `Screen`/`TerminalView` to the caller (the PTY).
+- [x] Reply to DA1/DA2, DSR/CPR, XTVERSION, OSC 10/11 colours and the kitty
+  keyboard query.
+- [ ] Answer the DCS termcap question once the wrapper's terminfo name is known.
+- [x] Do not reply when the program did not ask; avoid reply loops.
+- [x] Tests for each reply, including escapes split across feeds.
+
+Model state: the sink and every answer above are covered by `QueryReplyTest`;
+the DCS termcap answer and wiring the app's `LiveStream` write path remain.
 
 ### 1.5 Mouse, bracketed paste and focus
 

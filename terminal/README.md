@@ -21,6 +21,7 @@ comparison with xterm.js in a WebView, is
 | `Viewport` | the window over the history and the live grid: scroll offset, clamping, follow-at-bottom. Package-private |
 | `Selection` | an inclusive cell range over the viewport, and the text it copies with hard breaks kept and wrapped rows joined. Package-private |
 | `KeyEncoder` | the bytes a hardware key sends, normal or application-cursor mode. Package-private |
+| `ReplySink` | the caller's write path for the answers a screen owes a querying program |
 | `TerminalAccessibility` | the row and prompt nodes, their events, and the announcement timer. Package-private |
 
 `TerminalView` loads `terminal-mono.ttf` from the host app's assets when present —
@@ -49,6 +50,10 @@ A program on the alternate screen receives hardware keys as terminal bytes:
 arrows, Home/End, Page up/down, Insert/Delete, Esc, Tab, Backspace and
 F1-F12, with DECCKM switching arrows and Home/End to the `ESC O` forms.
 Ctrl and Alt modify typed characters in that mode.
+
+Queries are answered through a `ReplySink`: DA1/DA2, DSR and CPR, XTVERSION,
+the kitty keyboard query and OSC 10/11 colours. Point it at the pty's
+write path; with no sink the screen stays quiet.
 
 Dragging the view scrolls back through the primary screen's history, and a fling
 carries on at finger speed. While scrolled back, output that pushes rows into
@@ -96,7 +101,8 @@ scrolling into history, clamping at both ends, output while scrolled back not
 moving the row being read, the alternate screen resetting the view, `ED 3`, and
 a 3000-line history. The selection checks cover inclusive ranges, backwards
 drags, hard breaks versus wrapped rows, scrollback and clamping. The key checks cover each named
-sequence, application-cursor mode, and the control/escape forms. They need no
+sequence, application-cursor mode, and the control/escape forms. The reply checks cover every
+answer and queries split across feeds. They need no
 device, no Gradle and no test framework, because the models are plain Java. The view itself needs a device
 and is covered by `samples/e2e.sh`.
 

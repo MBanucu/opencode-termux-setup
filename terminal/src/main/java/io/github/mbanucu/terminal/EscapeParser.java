@@ -22,6 +22,9 @@ final class EscapeParser {
 
         void tab();
 
+        /** The payload of an OSC string, between its introducer and BEL/ST. */
+        void operatingSystemCommand(String payload);
+
         void controlSequence(String raw, char last);
     }
 
@@ -91,28 +94,45 @@ final class EscapeParser {
             }
             return 0;
         }
-        if (kind == ']' || kind == 'P' || kind == 'X' || kind == '^' || kind == '_') {
-            // OSC, DCS, SOS, PM and APC are strings, not text. opencode asks its
-            // termcap question with DCS (+q4d73); the payload is not a row.
-            for (int j = index + 2; j < length; j++) {
-                char c = pending.charAt(j);
-                if (c == 0x07) {
-                    return j - index + 1;
-                }
-                if (c == 0x1b) {
-                    if (j + 1 >= length) {
-                        return 0;
-                    }
-                    if (pending.charAt(j + 1) == '\\') {
-                        return j - index + 2;
-                    }
-                }
-            }
-            return 0;
+        if (kind == ']') {
+            return stringEnd(index, true);
+        }
+        if (kind == 'P' || kind == 'X' || kind == '^' || kind == '_') {
+            return stringEnd(index, false);
         }
         if (kind == '(' || kind == ')' || kind == '*' || kind == '+') {
             return index + 2 < length ? 3 : 0;
         }
         return 2;
+    }
+
+    /**
+     * The end of an OSC/DCS/SOS/PM/APC string: BEL or ST. Only an OSC payload
+     * is reported; the rest are strings a screen does not act on, including
+     * opencode's DCS termcap question (+q4d73).
+     */
+    private int stringEnd(int index, boolean report) {
+        int length = pending.length();
+        for (int j = index + 2; j < length; j++) {
+            char c = pending.charAt(j);
+            if (c == 0x07) {
+                if (report) {
+                    handler.operatingSystemCommand(pending.substring(index + 2, j));
+                }
+                return j - index + 1;
+            }
+            if (c == 0x1b) {
+                if (j + 1 >= length) {
+                    return 0;
+                }
+                if (pending.charAt(j + 1) == '\\') {
+                    if (report) {
+                        handler.operatingSystemCommand(pending.substring(index + 2, j));
+                    }
+                    return j - index + 2;
+                }
+            }
+        }
+        return 0;
     }
 }

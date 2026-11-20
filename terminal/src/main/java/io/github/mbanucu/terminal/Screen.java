@@ -22,6 +22,8 @@ final class Screen implements EscapeParser.Handler {
     static final int DEFAULT_HISTORY_LINES = 3000;
 
     private final EscapeParser parser = new EscapeParser(this);
+    /** Where answers to a program's queries go; null means stay quiet. */
+    private ReplySink replySink;
     private char[][] main;
     private char[][] alt;
     /** Whether each row of the primary buffer continues on the next row. */
@@ -321,6 +323,26 @@ final class Screen implements EscapeParser.Handler {
         csi(raw, last);
     }
 
+    /** Sets the pty's write path, or null to answer nothing. */
+    void setReplySink(ReplySink sink) {
+        replySink = sink;
+    }
+
+    private void reply(String bytes) {
+        if (replySink != null) {
+            replySink.send(bytes);
+        }
+    }
+
+    @Override
+    public void operatingSystemCommand(String payload) {
+        if (payload.equals("10;?")) {
+            reply("\u001b]10;rgb:dcdc/dcdc/dcdc\u001b\\");
+        } else if (payload.equals("11;?")) {
+            reply("\u001b]11;rgb:1010/1414/1818\u001b\\");
+        }
+    }
+
     private void csi(String raw, char last) {
         boolean privateMode = raw.startsWith("?");
         String body = privateMode ? raw.substring(1) : raw;
@@ -328,11 +350,34 @@ final class Screen implements EscapeParser.Handler {
         if (privateMode) {
             if (last == 'h' || last == 'l') {
                 applyModes(parts, last == 'h');
+            } else if (last == 'u' && body.isEmpty()) {
+                // The kitty keyboard query: no enhanced flags are supported.
+                reply("\u001b[?0u");
             }
+            return;
+        }
+        if (reportIdentity(body, last)) {
             return;
         }
         dispatch(parts, last);
         wrapPending = false;
+    }
+
+    /** DA1, DA2 and XTVERSION: the queries whose answer never changes. */
+    private boolean reportIdentity(String body, char last) {
+        if (last == 'c') {
+            if (body.isEmpty()) {
+                reply("\u001b[?1;2c");
+            } else if (body.equals(">")) {
+                reply("\u001b[>84;0;0c");
+            }
+            return true;
+        }
+        if (last == 'q' && body.startsWith(">")) {
+            reply("\u001bP>|terminal(1)\u001b\\");
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -466,13 +511,25 @@ final class Screen implements EscapeParser.Handler {
             case 'm':
                 sgr.apply(parts);
                 break;
+            case 'n':
+                deviceStatus(parts);
+                break;
             case 'q':
                 cursorStyle(parts);
                 break;
             default:
-                // h/l (modes other than the alternate screen), n (device
-                // status), q (cursor shape): nothing to place.
+                // h/l (modes other than the alternate screen): nothing to place.
                 break;
+        }
+    }
+
+    /** DSR 5 is "are you OK"; DSR 6 is the cursor position report. */
+    private void deviceStatus(String[] parts) {
+        int request = number(parts, 0, 0);
+        if (request == 5) {
+            reply("\u001b[0n");
+        } else if (request == 6) {
+            reply("\u001b[" + (cursorRow() + 1) + ";" + (cursorCol() + 1) + "R");
         }
     }
 
