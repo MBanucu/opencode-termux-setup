@@ -39,7 +39,8 @@ If a command is refused, Termux\'s \"allow external apps\" setting must be enabl
     <string name="key_end">END</string>
     <string name="key_pgup">PGUP</string>
     <string name="key_pgdn">PGDN</string>
-    <string name="key_paste">PASTE</string>
+    <string name="key_paste">⎘</string>
+    <string name="key_paste_desc">PASTE</string>
     <string name="key_left">←</string>
     <string name="key_up">↑</string>
     <string name="key_down">↓</string>

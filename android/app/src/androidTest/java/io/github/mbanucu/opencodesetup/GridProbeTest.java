@@ -43,6 +43,11 @@ public final class GridProbeTest {
             repeat("\u00b7", 70),
             repeat("\u2026", 70),
             repeat("\u2584", 70),
+            // The same row twice: a background-filled run of spaces gives the
+            // exact cell width with no glyph ink in the way, so the row of
+            // blocks under it can be compared against it directly.
+            "\u001b[48;5;245m" + repeat(" ", 70) + "\u001b[0m",
+            repeat("\u2580", 70),
             "END-MARKER") + "\n";
 
     /** The terminal font sizes to photograph; 8 is the opencode page's own. */

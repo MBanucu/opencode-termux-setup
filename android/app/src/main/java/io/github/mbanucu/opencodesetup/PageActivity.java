@@ -567,7 +567,12 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                     LinearLayout top = keyRow();
                     top.addView(terminalKey(R.string.key_esc, () -> type(ESC)), keyParams(1f));
                     top.addView(terminalKey(R.string.key_slash, () -> type(SLASH)), keyParams(1f));
-                    top.addView(terminalKey(R.string.key_paste, this::paste), keyParams(1f));
+                    // PASTE is a glyph, the way Termux draws it: the word needed
+                    // more room than its cell has on a narrow screen.
+                    Button paste = terminalKey(R.string.key_paste, this::paste);
+                    paste.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+                    paste.setContentDescription(getString(R.string.key_paste_desc));
+                    top.addView(paste, keyParams(1f));
                     // Each key sits over its partner: Home over Left, Up over Down,
                     // End over Right and Page up over Page down, so both rows read
                     // as one grid of columns.
