@@ -272,6 +272,11 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         script("resetTerm()");
     }
 
+    /** Lets a reused page measure itself again for its new intent. */
+    protected void thawTerminal() {
+        script("thawFit()");
+    }
+
     /** Drops the command this page is showing, so a new intent can take its place. */
     protected void abandonCommand() {
         pendingSend = null;
@@ -520,7 +525,12 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             }
 
             output = web;
-            web.loadUrl("file:///android_asset/terminal.html");
+            // The font travels in the URL so it is in place before the terminal
+            // measures its first grid. The PTY is sent that grid, and a font set
+            // after the command starts would leave it drawing to the old width.
+            int font = getIntent() == null ? 0 : getIntent().getIntExtra("terminal_font", 0);
+            web.loadUrl("file:///android_asset/terminal.html"
+                    + (font > 0 ? "?font=" + font : ""));
         }
         return output;
     }
@@ -676,9 +686,14 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         });
         try {
             TermuxCommands.send(this, command, label, description, port, columns, rows);
+            // The PTY has this grid now; a window resize (the keyboard opening,
+            // for one) must not reflow it underneath the running program.
+            script("lockFit()");
             Diagnostics.log(this, "sent " + label + " port="
                     + (port == 0 ? "none" : port)
                     + " pty=" + columns + "x" + rows);
+            // The PTY has the grid now; the page must not hand out another one.
+            script("freezeFit()");
             clearNotice();
             if (port > 0) {
                 startOutput();
@@ -871,13 +886,16 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 // Before its first fit the emulator reports a couple of cells.
                 // Sending a command at that width is worse than waiting.
                 if (reportedColumns >= 20 && reportedRows >= 5) {
+                    // The first reported size is the one the page keeps: it
+                    // freezes its grid as soon as the command is sent, so a row
+                    // cannot be trimmed out from under a TUI's status bar.
                     columns = reportedColumns;
                     // Qualified: "rows" above is the matcher, not the field.
                     PageActivity.this.rows = reportedRows;
                 }
             }
             Runnable ready = pendingSend;
-            if (ready != null && columns > 0) {
+            if (ready != null) {
                 pendingSend = null;
                 ui.post(ready);
             }

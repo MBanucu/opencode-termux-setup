@@ -28,11 +28,24 @@ public final class TerminalActivity extends PageActivity {
     /** Opens a page that runs {@code command} as soon as it appears. */
     static void start(Context from, String command, String label, String description,
             CharSequence title) {
+        start(from, command, label, description, title, 0);
+    }
+
+    /**
+     * The same, with a terminal font size in pixels.
+     *
+     * <p>A TUI uses more of the screen than a two line check does. The PTY is
+     * resized to the cells that fit, so a smaller font is also a larger terminal
+     * for the program it runs.
+     */
+    static void start(Context from, String command, String label, String description,
+            CharSequence title, int fontPx) {
         Intent page = new Intent(from, TerminalActivity.class);
         page.putExtra(EXTRA_COMMAND, command);
         page.putExtra(EXTRA_LABEL, label);
         page.putExtra(EXTRA_DESCRIPTION, description);
         page.putExtra(EXTRA_TITLE, title);
+        page.putExtra("terminal_font", fontPx);
         from.startActivity(page);
     }
 
@@ -66,6 +79,9 @@ public final class TerminalActivity extends PageActivity {
         }
         setIntent(intent);
         abandonCommand();
+        // A reused page froze the grid its last command was given; the new
+        // intent may pin another height, so it measures itself again.
+        thawTerminal();
         CharSequence title = intent.getCharSequenceExtra(EXTRA_TITLE);
         retitle(title == null ? getString(R.string.app_name) : title);
         pinTerminalHeight();

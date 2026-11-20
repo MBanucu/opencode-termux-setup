@@ -3,10 +3,10 @@ package io.github.mbanucu.opencodesetup;
 import android.os.Bundle;
 
 /**
- * The terminal for "Check setup", on a page of its own.
+ * The choice before the terminal: check the setup, or start opencode itself.
  *
- * <p>A single decision - run the check or go back - and then the terminal page
- * that runs it. This screen used to own the terminal itself; now that the command
+ * <p>Both actions open the same terminal page, one for the version check and one
+ * for the agent. This screen used to own the terminal itself; now that a command
  * gets a whole page, this one is only the choice and a sentence about it.
  */
 public final class CheckActivity extends PageActivity {
@@ -20,5 +20,14 @@ public final class CheckActivity extends PageActivity {
                 Commands.CHECK, "Check opencode",
                 "Report the installed opencode version",
                 getString(R.string.check_title)));
+        // The check only says whether opencode is there; this opens it, in the
+        // same inline terminal the check's output is printed in. The smaller
+        // font is for the TUI: more rows and columns, and the PTY gets them.
+        // Below about sixty columns opencode drops the footer it prints its
+        // version in, so the grid has to be wider than a check needs.
+        button(R.string.check_opencode_action, v -> TerminalActivity.start(this,
+                Commands.OPENCODE, "opencode",
+                "Start the opencode coding agent",
+                getString(R.string.check_opencode_title), 8));
     }
 }

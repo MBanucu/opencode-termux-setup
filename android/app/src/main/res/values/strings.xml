@@ -15,8 +15,10 @@
     <string name="action_grant">Allow Termux commands</string>
 
     <string name="check_title">Check opencode</string>
-    <string name="check_body">Runs opencode --version in Termux and prints what it answers. Nothing is installed, removed or changed.</string>
+    <string name="check_body">Runs opencode --version in Termux and prints what it answers. Nothing is installed, removed or changed. The second action starts opencode itself in the same terminal.</string>
     <string name="check_action">Run check</string>
+    <string name="check_opencode_action">Open opencode</string>
+    <string name="check_opencode_title">opencode</string>
 
     <string name="hint">Setup runs inside Termux in the background, so this screen stays in front. Each command opens its own page, and Termux\'s output streams there while it runs.
 

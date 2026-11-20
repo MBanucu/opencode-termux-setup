@@ -19,6 +19,9 @@ final class Commands {
     static final String CHECK =
             "opencode --version 2>/dev/null || echo 'opencode is not installed'";
 
+    /** The agent itself, started in this app's own terminal. */
+    static final String OPENCODE = "opencode";
+
     private Commands() {
     }
 }
