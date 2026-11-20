@@ -5,10 +5,12 @@ package io.github.mbanucu.terminal;
  *
  * <p>Named keys are sequences, not text: arrows and Home/End switch between
  * CSI and SS3 with DECCKM, the editing keys end in {@code ~}, and F1-F4 use SS3
- * while F5-F12 use {@code CSI n ~}. Typed characters keep their IME/unicode
- * path, with Ctrl folded to a control byte and Alt prefixed by ESC. No key is
- * encoded here for the shell prompt: the view owns that line until it is
- * submitted.
+ * while F5-F12 use {@code CSI n ~}. A modified arrow, Home or End is always
+ * {@code CSI 1 ; m final}, where {@code m} is 1 plus Shift, 2 for Alt and 4 for
+ * Ctrl, because that is how xterm reports the modifiers. Typed characters keep
+ * their IME/unicode path, with Ctrl folded to a control byte and Alt prefixed by
+ * ESC. No key is encoded here for the shell prompt: the view owns that line
+ * until it is submitted.
  */
 final class KeyEncoder {
 
@@ -45,6 +47,10 @@ final class KeyEncoder {
     /** The sequence for a named key, or "" when the key has none. */
     static String encode(int key, boolean ctrl, boolean alt, boolean shift,
             boolean applicationCursor) {
+        char cursor = cursorFinal(key);
+        if (cursor != 0 && modifier(ctrl, alt, shift) > 1) {
+            return "\u001b[1;" + modifier(ctrl, alt, shift) + cursor;
+        }
         String sequence = sequence(key, shift, applicationCursor);
         if (sequence.isEmpty()) {
             return "";
@@ -52,7 +58,36 @@ final class KeyEncoder {
         return alt ? "\u001b" + sequence : sequence;
     }
 
+    /** xterm's modifier parameter: 1 plus Shift, 2 for Alt and 4 for Ctrl. */
+    private static int modifier(boolean ctrl, boolean alt, boolean shift) {
+        return 1 + (shift ? 1 : 0) + (alt ? 2 : 0) + (ctrl ? 4 : 0);
+    }
+
+    /** The final byte of an arrow, Home or End, or 0 for any other key. */
+    private static char cursorFinal(int key) {
+        switch (key) {
+            case UP:
+                return 'A';
+            case DOWN:
+                return 'B';
+            case RIGHT:
+                return 'C';
+            case LEFT:
+                return 'D';
+            case HOME:
+                return 'H';
+            case END:
+                return 'F';
+            default:
+                return 0;
+        }
+    }
+
     private static String sequence(int key, boolean shift, boolean applicationCursor) {
+        char last = cursorFinal(key);
+        if (last != 0) {
+            return applicationCursor ? "\u001bO" + last : "\u001b[" + last;
+        }
         switch (key) {
             case ENTER:
                 return "\r";
@@ -62,18 +97,6 @@ final class KeyEncoder {
                 return "\u007f";
             case ESCAPE:
                 return "\u001b";
-            case UP:
-                return cursor('A', applicationCursor);
-            case DOWN:
-                return cursor('B', applicationCursor);
-            case RIGHT:
-                return cursor('C', applicationCursor);
-            case LEFT:
-                return cursor('D', applicationCursor);
-            case HOME:
-                return cursor('H', applicationCursor);
-            case END:
-                return cursor('F', applicationCursor);
             case PAGE_UP:
                 return "\u001b[5~";
             case PAGE_DOWN:
@@ -109,10 +132,6 @@ final class KeyEncoder {
             default:
                 return "";
         }
-    }
-
-    private static String cursor(char last, boolean applicationCursor) {
-        return applicationCursor ? "\u001bO" + last : "\u001b[" + last;
     }
 
     /** A typed character with Ctrl folded and Alt prefixed, as a terminal sends it. */

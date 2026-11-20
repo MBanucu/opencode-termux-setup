@@ -150,13 +150,15 @@ UI, clipboard and resize test remain.
 - [x] DECCKM/application-cursor mode for arrows and Home/End.
 - [x] Ctrl/Alt modifiers for typed characters and IME action; the IME
   text/Enter path is unchanged.
+- [x] Modifier-encoded cursor keys: a modified arrow, Home or End is
+  `CSI 1 ; m A|B|C|D|H|F` with `m` = 1 + Shift + 2*Alt + 4*Ctrl.
 - [ ] Keep the app's footer keys able to send their bytes directly; the module
   must also be complete for a hardware keyboard.
 - [ ] Tests with a scripted pty that echoes the received byte sequences.
 
-Model state: named keys, DECCKM and the Ctrl/Alt character forms are covered by
-`KeyEncoderTest`; modifier-encoded arrow sequences, the footer key path and the
-scripted-pty test remain.
+Model state: named keys, DECCKM, the Ctrl/Alt character forms and the
+modifier-encoded cursor keys are covered by `KeyEncoderTest`; the footer key
+path and the scripted-pty test remain.
 
 ### 1.4 Query replies
 

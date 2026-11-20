@@ -49,7 +49,9 @@ never wrote; the flag follows the row into history and survives a resize.
 A program on the alternate screen receives hardware keys as terminal bytes:
 arrows, Home/End, Page up/down, Insert/Delete, Esc, Tab, Backspace and
 F1-F12, with DECCKM switching arrows and Home/End to the `ESC O` forms.
-Ctrl and Alt modify typed characters in that mode.
+Ctrl, Alt and Shift modify a typed character or a cursor key: a modified arrow,
+Home or End is `ESC [ 1 ; m` plus its final byte, where `m` is 1 plus Shift,
+2 for Alt and 4 for Ctrl, so Alt+Left sends `ESC[1;3D`.
 
 Queries are answered through a `ReplySink`: DA1/DA2, DSR and CPR, XTVERSION,
 the kitty keyboard query and OSC 10/11 colours. Point it at the pty's

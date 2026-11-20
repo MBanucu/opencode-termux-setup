@@ -78,8 +78,22 @@ public final class KeyEncoderTest {
     }
 
     private static void modifiers() {
-        check("Alt+Left prefixes ESC", "\033\033[D",
+        check("Alt+Left is CSI 1;3 D", "\033[1;3D",
                 encode(KeyEncoder.LEFT, false, true, false, false));
+        check("Shift+Up is CSI 1;2 A", "\033[1;2A",
+                encode(KeyEncoder.UP, false, false, true, false));
+        check("Ctrl+Right is CSI 1;5 C", "\033[1;5C",
+                encode(KeyEncoder.RIGHT, true, false, false, false));
+        check("Ctrl+Shift+Home is CSI 1;6 H", "\033[1;6H",
+                encode(KeyEncoder.HOME, true, false, true, false));
+        check("Alt+End is CSI 1;3 F", "\033[1;3F",
+                encode(KeyEncoder.END, false, true, false, false));
+        check("Ctrl+Alt+Left is CSI 1;7 D", "\033[1;7D",
+                encode(KeyEncoder.LEFT, true, true, false, false));
+        check("modified Left stays CSI in application mode", "\033[1;3D",
+                encode(KeyEncoder.LEFT, false, true, false, true));
+        check("modified Down stays CSI in application mode", "\033[1;2B",
+                encode(KeyEncoder.DOWN, false, false, true, true));
         check("Ctrl+C is the control byte", "\003",
                 KeyEncoder.encodeCharacter('c', true, false));
         check("Ctrl+Space is NUL", "\000",
