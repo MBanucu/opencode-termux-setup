@@ -22,4 +22,7 @@ final class Pty {
     static native void close(int fd);
 
     static native int waitFor(int pid);
+
+    /** {access errno, stat errno, exec errno} for a program this app might try to run. */
+    static native int[] probeExec(String path);
 }

@@ -2,6 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.mbanucu.samples.nativeterminal">
 
+    <!-- Asks Termux to start a command for us; the sample's `termux` mode uses
+         it to get a real Terminal session instead of an app-owned pty. -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- Only for the loopback socket the session's output comes back on. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Without this, Android 11+ hides Termux from us entirely. -->
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
     <!-- No action bar: the platform's ActionBarOverlayLayout crashes on layout
          in this window, and a terminal wants the height anyway. -->
     <application
@@ -10,9 +22,16 @@
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:usesCleartextTraffic="false">
 
+        <!-- configChanges: a resize (rotation, a smaller display) must reach
+             onSizeChanged instead of recreating the activity, which would take
+             the pty or the Termux session down with it.
+             adjustResize: the keyboard shrinks the window, which is the resize
+             this sample exists to demonstrate. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
+            android:windowSoftInputMode="adjustResize"
             android:label="Native terminal">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

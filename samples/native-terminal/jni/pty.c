@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
@@ -187,4 +188,62 @@ Java_io_github_mbanucu_samples_nativeterminal_Pty_waitFor(JNIEnv *env, jclass cl
         return -errno;
     }
     return WIFEXITED(status) ? WEXITSTATUS(status) : -WTERMSIG(status);
+}
+
+// Can this app run a program that lives in another app's sandbox?
+//
+// This is the question behind "open an inline pty and start Termux's shell in
+// it". Termux's shell is at /data/data/com.termux/files/usr/bin/bash, which is
+// com.termux's private directory; the answer is decided by that app's uid and by
+// SELinux, not by the path being readable in a file manager. Returns
+// {access errno, stat errno, exec errno}, with 0 meaning "that step worked".
+JNIEXPORT jintArray JNICALL
+Java_io_github_mbanucu_samples_nativeterminal_Pty_probeExec(
+        JNIEnv *env, jclass cls, jstring path) {
+    const char *chars = (*env)->GetStringUTFChars(env, path, NULL);
+    char *program = strdup(chars);
+    (*env)->ReleaseStringUTFChars(env, path, chars);
+
+    int access_errno = 0;
+    if (access(program, X_OK) != 0) {
+        access_errno = errno;
+    }
+
+    struct stat info;
+    int stat_errno = 0;
+    if (stat(program, &info) != 0) {
+        stat_errno = errno;
+    }
+
+    // execve() only returns when it failed, so the child reports its errno over a
+    // pipe; a readable pipe means the child became the program and ran.
+    int exec_errno = -1;
+    int fds[2];
+    if (pipe(fds) == 0) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            close(fds[0]);
+            char *argv[] = { program, "-c", "echo exec-ok", NULL };
+            execv(program, argv);
+            int failure = errno;
+            write(fds[1], &failure, sizeof failure);
+            _exit(127);
+        }
+        close(fds[1]);
+        int got = pid > 0 ? (int) read(fds[0], &exec_errno, sizeof exec_errno) : -1;
+        if (got <= 0) {
+            exec_errno = 0;
+        }
+        close(fds[0]);
+        if (pid > 0) {
+            int status = 0;
+            waitpid(pid, &status, 0);
+        }
+    }
+    free(program);
+
+    jint values[3] = { access_errno, stat_errno, exec_errno };
+    jintArray out = (*env)->NewIntArray(env, 3);
+    (*env)->SetIntArrayRegion(env, out, 0, 3, values);
+    return out;
 }

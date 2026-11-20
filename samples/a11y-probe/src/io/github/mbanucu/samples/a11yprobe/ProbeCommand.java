@@ -29,6 +29,11 @@ public final class ProbeCommand extends BroadcastReceiver {
         String find = intent.getStringExtra("find");
         String text = intent.getStringExtra("text");
         String dump = intent.getStringExtra("dump");
+        // Sent from adb as a literal \n, meaning "and press enter".
+        if (text != null) {
+            text = text.replace("\\n", "\n");
+        }
+        ProbeService.setTarget(intent.getStringExtra("pkg"));
         String result;
         if (dump != null) {
             result = ProbeService.dump(dump);

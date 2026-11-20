@@ -9,3 +9,6 @@ __pycache__/
 samples/out/
 samples/xterm-a11y/assets/xterm/
 .tmp/
+
+# A standalone compile of the terminal module.
+terminal/out/

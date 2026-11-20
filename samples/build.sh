@@ -66,7 +66,15 @@ aapt2 link -o "$work/base.apk" \
 
 # --- java ----------------------------------------------------------------------
 echo "== $app: javac =="
-mapfile -t sources < <(find "$dir/src" "$work/gen" -name '*.java' 2>/dev/null)
+# The terminal view is a module, not part of any one app: terminal/src is compiled
+# into every sample, the way a library module's source set would be. Only the
+# classes a sample references end up in its dex, so compiling it everywhere costs
+# a second and keeps the module honest about being self-contained.
+if grep -rq 'io\.github\.mbanucu\.terminal' "$dir/src" 2>/dev/null; then
+    mapfile -t sources < <(find "$dir/src" "$work/gen" "$root/terminal/src/main/java" -name '*.java')
+else
+    mapfile -t sources < <(find "$dir/src" "$work/gen" -name '*.java' 2>/dev/null)
+fi
 javac -nowarn --release 17 -classpath "$android_jar" -d "$work/classes" "${sources[@]}"
 
 python3 - "$work/classes" "$work/classes.jar" <<'EOF'

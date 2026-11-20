@@ -42,6 +42,9 @@ public final class ProbeService extends AccessibilityService {
 
     static volatile ProbeService instance;
 
+    /** When set, actions go to this package's window instead of the active one. */
+    private static volatile String targetPackage;
+
     private final Deque<String> events = new ArrayDeque<>();
 
     static File files() {
@@ -200,13 +203,66 @@ public final class ProbeService extends AccessibilityService {
         }
     }
 
+    static void setTarget(String packageName) {
+        targetPackage = packageName;
+    }
+
+    /**
+     * The root of the target package's window, or of the active window when no
+     * target was given.
+     *
+     * <p>A screen reader works on the focused window, which is not always the app
+     * under test: with Termux visible behind, Termux's own text field is the first
+     * editable in the tree, and a naive SET_TEXT types into Termux's toolbar
+     * instead of the app. That is why the probe can be pointed at a package.
+     */
+    private static AccessibilityNodeInfo rootFor() {
+        ProbeService service = instance;
+        if (service == null) {
+            return null;
+        }
+        String wanted = targetPackage;
+        if (wanted == null) {
+            return service.getRootInActiveWindow();
+        }
+        List<AccessibilityWindowInfo> windows = service.getWindows();
+        if (windows != null) {
+            for (AccessibilityWindowInfo window : windows) {
+                AccessibilityNodeInfo root = window.getRoot();
+                if (root == null) {
+                    continue;
+                }
+                if (wanted.contentEquals(root.getPackageName())) {
+                    return root;
+                }
+                root.recycle();
+            }
+        }
+        // The window list lags a freshly started app: the service could see three
+        // windows and none of them this app, while `getRootInActiveWindow()` was
+        // already this app's. Using it is still safe, because the package check
+        // is what keeps an action from landing in Termux's toolbar; "whatever is
+        // in front" is not.
+        AccessibilityNodeInfo active = service.getRootInActiveWindow();
+        if (active != null) {
+            if (wanted.contentEquals(active.getPackageName())) {
+                return active;
+            }
+            active.recycle();
+        }
+        // Deliberately not *any* active window: an action meant for one app and
+        // performed on another is worse than none, and it is what made a test
+        // flake - the terminal's text went into Termux's toolbar and never ran.
+        return null;
+    }
+
     /** Finds a node whose text, description or id contains {@code needle}. */
     static AccessibilityNodeInfo find(CharSequence needle) {
         ProbeService service = instance;
         if (service == null) {
             return null;
         }
-        AccessibilityNodeInfo root = service.getRootInActiveWindow();
+        AccessibilityNodeInfo root = rootFor();
         if (root == null) {
             return null;
         }
@@ -243,18 +299,35 @@ public final class ProbeService extends AccessibilityService {
         Bundle arguments = new Bundle();
         arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
         boolean performed = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
-        String answer = "SET_TEXT on " + node.getClassName() + " editable=" + node.isEditable()
-                + " -> " + performed;
+        String answer = "SET_TEXT on " + node.getClassName() + " package=" + node.getPackageName()
+                + " editable=" + node.isEditable() + " -> " + performed;
         write("actions.txt", answer + "\n");
         node.recycle();
         return answer;
     }
 
     private static String setTextOnFirstEditable(String text) {
-        ProbeService service = instance;
-        AccessibilityNodeInfo root = service == null ? null : service.getRootInActiveWindow();
+        if (instance == null) {
+            return "probe service is not running";
+        }
+        AccessibilityNodeInfo root = rootFor();
         if (root == null) {
-            return "no editable node and no active window";
+            // Say what the service could see: "no window" alone does not tell a
+            // reader whether the app was not on screen or the list was empty.
+            ProbeService service = instance;
+            String active = "none";
+            int windows = 0;
+            if (service != null) {
+                AccessibilityNodeInfo front = service.getRootInActiveWindow();
+                if (front != null) {
+                    active = String.valueOf(front.getPackageName());
+                    front.recycle();
+                }
+                List<AccessibilityWindowInfo> list = service.getWindows();
+                windows = list == null ? 0 : list.size();
+            }
+            return "no window for " + (targetPackage == null ? "the active app" : targetPackage)
+                    + " (windows=" + windows + " active=" + active + ")";
         }
         Deque<AccessibilityNodeInfo> pending = new ArrayDeque<>();
         pending.add(root);
@@ -267,8 +340,8 @@ public final class ProbeService extends AccessibilityService {
                         AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
                 boolean performed = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,
                         arguments);
-                String answer = "SET_TEXT on first editable " + node.getClassName() + " -> "
-                        + performed;
+                String answer = "SET_TEXT on first editable " + node.getClassName()
+                        + " package=" + node.getPackageName() + " -> " + performed;
                 write("actions.txt", answer + "\n");
                 root.recycle();
                 return answer;
