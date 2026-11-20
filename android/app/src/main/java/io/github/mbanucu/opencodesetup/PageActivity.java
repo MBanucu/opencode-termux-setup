@@ -7,7 +7,6 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -68,6 +67,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     /** The emulator's size as published in the tail report. */
     private static final Pattern COLS = Pattern.compile("\"cols\":(\\d+)");
     private static final Pattern ROWS = Pattern.compile("\"rows\":(\\d+)");
+    private static final Pattern TERMINAL = Pattern.compile("\"terminal\":(\\d+)");
     private static final String TAG = "OpencodeSetup";
 
     protected LinearLayout column;
@@ -86,6 +86,10 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private volatile boolean ctrlArmed;
     /** Whether the soft keyboard is covering part of the page. */
     private boolean keyboardShown;
+    /** The tallest this window has been, which is its height without a keyboard. */
+    private int tallestHeight;
+    /** The terminal's fitted height, in dp: the grid the PTY was given. */
+    private int gridHeight;
     private boolean outputLoaded;
     private boolean fillerDone;
     private boolean fullScreen;
@@ -185,12 +189,16 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         int pad = dp(12);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(pad, pad, pad, pad);
+        // No page margin: the terminal and the key strip under it run to the
+        // edges the way Termux draws them, and the columns a margin used to take
+        // are columns the program on the other side of the PTY gets.
+        root.setPadding(0, 0, 0, 0);
         root.setFitsSystemWindows(true);
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(pad, pad, pad, 0);
 
         TextView back = new TextView(this);
         back.setText(getString(R.string.back) + "  ‹");
@@ -468,19 +476,6 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             FrameLayout frame = new FrameLayout(this);
             frame.addView(web, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-
-            // The progress strip is laid over the terminal's top edge rather than
-            // sitting below it: below, it was off a full-screen page's screen,
-            // and as a sibling it also shortened the terminal the moment a
-            // command started - after the PTY had been sized to the taller grid,
-            // so a row went missing.
-            busy = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-            busy.setIndeterminate(true);
-            busy.setVisibility(View.GONE);
-            FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, dp(4));
-            progressParams.gravity = Gravity.TOP;
-            frame.addView(busy, progressParams);
             frame.setVisibility(View.GONE);
             terminalFrame = frame;
 
@@ -510,6 +505,21 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 params.topMargin = dp(12);
                 params.bottomMargin = dp(8);
             }
+            // The progress strip goes above the terminal, not below it and not
+            // over it: below a full-screen page it was off the screen, and laid
+            // over the terminal it cut the tops off the program's first row. It
+            // keeps its four pixels while it is idle, because a strip that
+            // appeared as a sibling would shorten the terminal when a command
+            // started - after the PTY had been sized to the taller grid, so a
+            // row would go missing.
+            busy = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+            busy.setIndeterminate(true);
+            busy.setVisibility(View.INVISIBLE);
+            LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(4));
+            progressParams.bottomMargin = dp(4);
+            column.addView(busy, progressParams);
+
             column.addView(frame, params);
 
             copyButton = new Button(this);
@@ -526,35 +536,40 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 LinearLayout footer = new LinearLayout(this);
                 footer.setOrientation(LinearLayout.HORIZONTAL);
                 footer.setGravity(Gravity.CENTER_VERTICAL);
-                footer.setPadding(0, dp(8), 0, 0);
+                footer.setBackgroundColor(0xFF0D1116);
                 if (inputEnabled) {
                     // Ctrl first, as in Termux: a TUI cannot be used without it,
                     // because ^C interrupts a program and ^D ends one.
                     ctrlButton = key(R.string.key_ctrl);
                     ctrlButton.setOnClickListener(v -> setCtrlArmed(!ctrlArmed));
-                    footer.addView(ctrlButton, keyParams(0));
+                    footer.addView(ctrlButton, keyParams(1f));
                     keyboardButton = key(R.string.key_keyboard);
                     keyboardButton.setOnClickListener(v -> toggleKeyboard());
-                    footer.addView(keyboardButton, keyParams(8));
+                    footer.addView(keyboardButton, keyParams(1f));
+                } else {
+                    footer.addView(new View(this), keyParams(1f));
                 }
-                // Pushed to the end: copying is the smallest thing on the page.
-                footer.addView(new View(this), new LinearLayout.LayoutParams(0, 0, 1f));
+                // The smallest thing on the row: copying is not what the page is
+                // for, and Termux has no key for it either.
                 copyButton.setEnabled(false);
                 copyButton.setText(R.string.copy_short);
-                copyButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-                copyButton.setTextColor(0xFF9AA4B2);
+                copyButton.setAllCaps(false);
+                copyButton.setTypeface(Typeface.MONOSPACE);
+                copyButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+                copyButton.setTextColor(0xFF7C8792);
                 copyButton.setMinWidth(0);
                 copyButton.setMinimumWidth(0);
                 copyButton.setMinHeight(0);
                 copyButton.setMinimumHeight(0);
-                copyButton.setPadding(dp(10), dp(4), dp(10), dp(4));
-                GradientDrawable copyShape = new GradientDrawable();
-                copyShape.setColor(0x00000000);
-                copyShape.setCornerRadius(dp(6));
-                copyShape.setStroke(dp(1), 0xFF2A303A);
-                copyButton.setBackground(copyShape);
-                footer.addView(copyButton, keyParams(8));
-                column.addView(footer);
+                copyButton.setPadding(dp(14), 0, dp(14), 0);
+                copyButton.setBackground(null);
+                copyButton.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.MATCH_PARENT);
+                footer.addView(copyButton, copyParams);
+                column.addView(footer, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
             } else {
                 // Only meaningful once there is output; hidden until then, so it
                 // does not sit on a page that has run nothing.
@@ -577,49 +592,49 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     }
 
     /**
-     * One key of the terminal's footer, in the flat style of Termux's extra keys:
-     * dark, outlined, monospace, and as wide as its label rather than the page.
+     * One key of the terminal's footer, drawn the way Termux draws its extra
+     * keys: a flat label on the strip's own colour, no box around it, as wide as
+     * the share of the row it is given.
      */
     private Button key(int label) {
         Button view = new Button(this);
         view.setText(label);
         view.setAllCaps(false);
         view.setTypeface(Typeface.MONOSPACE);
-        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         view.setTextColor(0xFFDCDCDC);
         view.setMinWidth(0);
         view.setMinimumWidth(0);
         view.setMinHeight(0);
         view.setMinimumHeight(0);
-        view.setPadding(dp(14), dp(6), dp(14), dp(6));
-        view.setBackground(keyShape(false));
+        view.setPadding(0, 0, 0, 0);
+        view.setBackground(null);
+        view.setGravity(Gravity.CENTER);
         return view;
     }
 
-    /** The outline a footer key has: filled while Ctrl is waiting. */
-    private GradientDrawable keyShape(boolean armed) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(armed ? 0xFF2F6FB2 : 0xFF161B22);
-        shape.setCornerRadius(dp(8));
-        shape.setStroke(dp(1), armed ? 0xFF2F6FB2 : 0xFF2A303A);
-        return shape;
+    /** A footer child: a share of the row, at the strip's full height. */
+    private LinearLayout.LayoutParams keyParams(float weight) {
+        return new LinearLayout.LayoutParams(
+                weight > 0f ? 0 : LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                weight);
     }
 
-    private LinearLayout.LayoutParams keyParams(int leftMargin) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.leftMargin = dp(leftMargin);
-        return params;
-    }
-
-    /** Arms Ctrl for exactly one key, and shows that it is waiting. */
+    /**
+     * Arms Ctrl for exactly one key, and shows that it is waiting.
+     *
+     * <p>Termux fills its Ctrl key while it is held; the fill is the only shape
+     * the strip has, and it is square for the same reason the keys are flat.
+     */
     private void setCtrlArmed(boolean armed) {
         ctrlArmed = armed;
         if (ctrlButton == null) {
             return;
         }
-        ctrlButton.setBackground(keyShape(armed));
+        GradientDrawable held = new GradientDrawable();
+        held.setColor(0xFF2F6FB2);
+        ctrlButton.setBackground(armed ? held : null);
         ctrlButton.setTextColor(armed ? 0xFFFFFFFF : 0xFFDCDCDC);
     }
 
@@ -654,12 +669,46 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
      */
     private void keyboardChanged() {
         View content = findViewById(android.R.id.content);
-        if (content == null) {
+        if (content == null || content.getHeight() <= 0) {
             return;
         }
-        Rect visible = new Rect();
-        content.getWindowVisibleDisplayFrame(visible);
-        keyboardShown = content.getRootView().getHeight() - visible.bottom > dp(120);
+        // Measured against the tallest this window has been, not against the
+        // visible display frame: this page resizes for the keyboard, so the frame
+        // and the window shrink together and their difference stays zero.
+        int height = content.getHeight();
+        tallestHeight = Math.max(tallestHeight, height);
+        keyboardShown = tallestHeight - height > dp(120);
+    }
+
+    /**
+     * Keeps the terminal at the height it was fitted to, aligned to the bottom.
+     *
+     * <p>The keyboard makes this page shorter, but the grid the PTY was given
+     * cannot shrink with it - that would reflow a program still drawing to the
+     * old grid. A terminal held at its own height and aligned bottom is clipped
+     * from the top instead of the bottom, so the rows being typed at - a TUI's
+     * composer and status line - stay on screen, which is what Termux shows when
+     * its keyboard is open.
+     */
+    private void pinGridHeight(int cssHeight) {
+        WebView box = output;
+        if (box == null || cssHeight <= 0 || cssHeight == gridHeight) {
+            return;
+        }
+        // A page whose height the intent pins is measuring the terminal, and a
+        // terminal held at an older height would no longer be what it reports:
+        // that page's frame is the authoritative size for it.
+        if (getIntent() != null && getIntent().getFloatExtra("terminal_fraction", 0f) > 0f) {
+            return;
+        }
+        gridHeight = cssHeight;
+        ViewGroup.LayoutParams params = box.getLayoutParams();
+        if (!(params instanceof FrameLayout.LayoutParams)) {
+            return;
+        }
+        params.height = dp(cssHeight);
+        ((FrameLayout.LayoutParams) params).gravity = Gravity.BOTTOM;
+        box.setLayoutParams(params);
     }
 
     /** Shows a problem on the page, with an optional action button. */
@@ -873,7 +922,9 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             button.setEnabled(!active);
         }
         if (busy != null) {
-            busy.setVisibility(active ? View.VISIBLE : View.GONE);
+            // Invisible, not gone: the strip holds its rows so the terminal does
+            // not have to be re-measured when a command starts or ends.
+            busy.setVisibility(active ? View.VISIBLE : View.INVISIBLE);
         }
         for (View view : collapseOnRun) {
             view.setVisibility(active ? View.GONE : View.VISIBLE);
@@ -1021,6 +1072,11 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                     // Qualified: "rows" above is the matcher, not the field.
                     PageActivity.this.rows = reportedRows;
                 }
+            }
+            java.util.regex.Matcher height = TERMINAL.matcher(json);
+            if (height.find()) {
+                int cssHeight = Integer.parseInt(height.group(1));
+                ui.post(() -> pinGridHeight(cssHeight));
             }
             Runnable ready = pendingSend;
             if (ready != null) {

@@ -61,12 +61,15 @@
             android:label="@string/check_title" />
 
         <!-- A confirmed command gets this page: header, the terminal filling the
-             screen, footer with Ctrl, the keyboard and copy. Not exported. -->
+             screen, footer with Ctrl, the keyboard and copy. The window shrinks
+             for the keyboard instead of panning, so that footer stays above it
+             the way Termux's extra keys do; panning slid the keys under the
+             keyboard, which left nothing to press while typing. Not exported. -->
         <activity
             android:name=".TerminalActivity"
             android:exported="false"
             android:label="@string/app_name"
-            android:windowSoftInputMode="adjustPan" />
+            android:windowSoftInputMode="adjustResize" />
 
         <!-- adb entry point, so every action the UI offers is scriptable:
                adb shell am start -n io.github.mbanucu.opencodesetup/.AdbCommandActivity -e command check
