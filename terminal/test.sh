@@ -31,6 +31,7 @@ javac -nowarn --release 17 -d "$work" \
     "$here/src/test/java/io/github/mbanucu/terminal/EraseTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/ScrollTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/SequenceTest.java" \
+    "$here/src/test/java/io/github/mbanucu/terminal/InputModeTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/AttributeTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/ColourTest.java" \
     "$here/src/test/java/io/github/mbanucu/terminal/WritingTest.java" \
@@ -44,6 +45,7 @@ java -cp "$work" io.github.mbanucu.terminal.CursorTest
 java -cp "$work" io.github.mbanucu.terminal.EraseTest
 java -cp "$work" io.github.mbanucu.terminal.ScrollTest
 java -cp "$work" io.github.mbanucu.terminal.SequenceTest
+java -cp "$work" io.github.mbanucu.terminal.InputModeTest
 java -cp "$work" io.github.mbanucu.terminal.AttributeTest
 java -cp "$work" io.github.mbanucu.terminal.ColourTest
 java -cp "$work" io.github.mbanucu.terminal.WritingTest

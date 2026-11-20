@@ -72,61 +72,60 @@ final class Modes {
      * caret at the start of every frame and shows it at the end.
      */
     boolean apply(int mode, boolean set) {
-        if (mode == 2026) {
-            if (set) {
-                syncUpdate = true;
-            } else {
-                syncUpdate = false;
-                if (hasPendingCursorVisible) {
-                    cursorVisible = pendingCursorVisible;
-                    hasPendingCursorVisible = false;
+        switch (mode) {
+            case 2026:
+                if (set) {
+                    syncUpdate = true;
+                } else {
+                    syncUpdate = false;
+                    if (hasPendingCursorVisible) {
+                        cursorVisible = pendingCursorVisible;
+                        hasPendingCursorVisible = false;
+                    }
                 }
-            }
-            return true;
+                return true;
+            case 25:
+                if (syncUpdate) {
+                    pendingCursorVisible = set;
+                    hasPendingCursorVisible = true;
+                } else {
+                    cursorVisible = set;
+                }
+                return true;
+            case 1:
+                applicationCursor = set;
+                return true;
+            case 12:
+                cursorBlink = set;
+                return true;
+            case 2004:
+                bracketedPaste = set;
+                return true;
+            case 1000:
+            case 1002:
+            case 1003:
+                // The three tracking modes replace each other; each turns itself off.
+                if (set) {
+                    mouseMode = mode;
+                } else if (mouseMode == mode) {
+                    mouseMode = 0;
+                }
+                return true;
+            case 1006:
+            case 1015:
+                if (set) {
+                    mouseEncoding = mode;
+                } else if (mouseEncoding == mode) {
+                    mouseEncoding = 0;
+                }
+                return true;
+            case 1004:
+            case 2031:
+                focusReporting = set;
+                return true;
+            default:
+                return false;
         }
-        if (mode == 25) {
-            if (syncUpdate) {
-                pendingCursorVisible = set;
-                hasPendingCursorVisible = true;
-            } else {
-                cursorVisible = set;
-            }
-            return true;
-        }
-        if (mode == 1) {
-            applicationCursor = set;
-            return true;
-        }
-        if (mode == 12) {
-            cursorBlink = set;
-            return true;
-        }
-        if (mode == 2004) {
-            bracketedPaste = set;
-            return true;
-        }
-        if (mode == 1000 || mode == 1002 || mode == 1003) {
-            // The three tracking modes replace each other; each turns itself off.
-            if (set) {
-                mouseMode = mode;
-            } else if (mouseMode == mode) {
-                mouseMode = 0;
-            }
-            return true;
-        }
-        if (mode == 1006 || mode == 1015) {
-            if (set) {
-                mouseEncoding = mode;
-            } else if (mouseEncoding == mode) {
-                mouseEncoding = 0;
-            }
-            return true;
-        }
-        if (mode == 1004 || mode == 2031) {
-            focusReporting = set;
-            return true;
-        }
-        return false;
     }
 
     /** A program that leaves mid-update must not leave the caret deferred. */
