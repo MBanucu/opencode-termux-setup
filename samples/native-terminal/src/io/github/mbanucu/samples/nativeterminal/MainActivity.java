@@ -3,6 +3,10 @@ package io.github.mbanucu.samples.nativeterminal;
 import io.github.mbanucu.terminal.TerminalView;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -35,9 +39,24 @@ public final class MainActivity extends Activity {
 
     private static final String TAG = "PtySample";
 
+    /**
+     * Shortens the terminal view under a running command, carrying a
+     * {@code resize_fraction} extra.
+     *
+     * <p>A view change is the half of a resize this sample demonstrates, and the
+     * pty follows it. The e2e suite used to make the same change with
+     * {@code wm size}, which is the phone owner's display setting: a run that died
+     * before its trap left the screen at that size. A broadcast to the app is
+     * undone by the next launch. Exported because the sender is {@code adb shell},
+     * a different uid; this is a diagnostic sample, not a shipped app.
+     */
+    public static final String ACTION_RESIZE =
+            "io.github.mbanucu.samples.nativeterminal.action.RESIZE";
+
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final StringBuilder transcript = new StringBuilder();
     private TerminalView terminal;
+    private LinearLayout root;
     private TextView status;
     private volatile int master = -1;
     private LiveStream live;
@@ -49,7 +68,13 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        LinearLayout root = new LinearLayout(this);
+        IntentFilter resizes = new IntentFilter(ACTION_RESIZE);
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(resizeReceiver, resizes, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(resizeReceiver, resizes);
+        }
+        root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         int pad = Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 8,
                 getResources().getDisplayMetrics()));
@@ -222,6 +247,42 @@ public final class MainActivity extends Activity {
         if (imm != null) {
             imm.hideSoftInputFromWindow(terminal.getWindowToken(), 0);
         }
+    }
+
+    /** Resizes the terminal to a fraction of the window, the way the keyboard does. */
+    private final BroadcastReceiver resizeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context from, Intent intent) {
+            float fraction = intent == null ? 0f : intent.getFloatExtra("resize_fraction", 0f);
+            if (fraction <= 0f) {
+                return;
+            }
+            writeEvidence("resize:" + fraction);
+            pinTerminalHeight(fraction);
+        }
+    };
+
+    /**
+     * Shortens the terminal view, and leaves every other window alone.
+     *
+     * <p>The grid follows the view and the pty follows the grid, which is the
+     * whole resize path; the display's own size is never part of it.
+     */
+    private void pinTerminalHeight(float fraction) {
+        if (terminal == null) {
+            return;
+        }
+        int window = root != null && root.getHeight() > 0
+                ? root.getHeight()
+                : getResources().getDisplayMetrics().heightPixels;
+        LinearLayout.LayoutParams params =
+                (LinearLayout.LayoutParams) terminal.getLayoutParams();
+        // A weighted view is given whatever space is left, so a height on its own
+        // would be measured and then ignored; take the weight away first.
+        params.weight = 0f;
+        params.height = Math.max(1, Math.round(window * fraction));
+        terminal.setLayoutParams(params);
+        terminal.requestLayout();
     }
 
     private Button button(String label, android.view.View.OnClickListener click) {
@@ -852,6 +913,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        unregisterReceiver(resizeReceiver);
         int fd = master;
         master = -1;
         if (fd >= 0) {

@@ -13,9 +13,10 @@
 #   bash samples/e2e.sh --quiet           # failures and the summary only
 #   bash samples/e2e.sh --restore         # put back what a dead run left changed
 #
-# The probe service is enabled for the run, and the display size and
-# accessibility settings are put back the way they were found - even when a
-# check fails or the run is interrupted.
+# The probe service is enabled for the run, and the accessibility settings are
+# put back the way they were found - even when a check fails or the run is
+# interrupted. The display's size is never changed: a window is resized through
+# the app itself.
 set -u
 
 ADB=${ADB:-adb}
@@ -66,18 +67,16 @@ ensure_device() {
 }
 
 # --- device state -------------------------------------------------------------
-# The suite changes two settings that belong to the phone's owner: the display
-# size, which is how a window is made to move, and the accessibility service it
-# drives. Saving the values first is what makes "put it back" true - `wm size
-# reset` throws away an override that was there before the run, and switching
-# accessibility off turns a screen reader off for good when a run dies before
-# its cleanup.
+# The suite changes one setting that belongs to the phone's owner: the
+# accessibility service it drives, and switching it off turns a screen reader off
+# for good when a run dies before its cleanup. Saving the value first is what
+# makes "put it back" true.
 #
-# The saved values go to disk, not only into this shell: a run killed outright,
-# or one whose wireless adb drops while the display is resized, never reaches
-# its trap and leaves the phone at 800x1400. The file is what lets the next run -
-# or `--restore` - put it back, and it is only deleted once the phone is seen to
-# be back.
+# The saved values go to disk, not only into this shell, because a run killed
+# outright never reaches its trap. The file is what lets the next run - or
+# `--restore` - put it back, and it is only deleted once the phone is seen to be
+# back. The display size is saved only so a state file written by an older run
+# (which resized the display) is still repaired; this suite never changes it.
 
 here=$(cd "$(dirname "$0")" && pwd)
 STATE_FILE=$here/out/device-state.txt
@@ -200,8 +199,7 @@ restore_only() {
         say "could not restore the saved state; it is still in $STATE_FILE"
         return 1
     fi
-    say "no saved state; undoing this suite's display override and probe"
-    restore_display
+    say "no saved state; removing this suite's accessibility probe"
     local services remaining
     services=$(read_secure_setting enabled_accessibility_services)
     case "$services" in
@@ -221,11 +219,6 @@ restore_only() {
             fi
             ;;
     esac
-    if [ -n "$(read_size_override)" ]; then
-        say "  the display still has an override: $(read_size_override)"
-    else
-        say "  display override removed"
-    fi
     return 0
 }
 
@@ -355,6 +348,15 @@ expect() {
     if evidence | grep -aqF -- "$1"; then ok "$2"; else bad "$2 (no '$1' in evidence)"; fi
 }
 
+# Shortens the app's own terminal view, the way the keyboard does. The display's
+# size belongs to the phone's owner: `wm size` made the same window change, but a
+# run that died before its trap left the screen at that size.
+resize_window() {
+    local fraction=${1:-0.3}
+    device shell "am broadcast -p $APP -a $APP.action.RESIZE \
+        --ef resize_fraction $fraction" >/dev/null 2>&1
+}
+
 # The newest grid the view reported, as CxR.
 last_grid() { evidence | grep -a '^### grid:' | tail -1 | sed 's/.*grid://'; }
 
@@ -471,17 +473,21 @@ install_everything() {
 # A clean app and a granted Termux permission. pm clear revokes runtime
 # permissions, so the grant has to come after it, not before.
 launch() {
-    device shell am force-stop "$APP" >/dev/null 2>&1
-    device shell pm clear "$APP" >/dev/null 2>&1
-    device shell pm grant "$APP" com.termux.permission.RUN_COMMAND >/dev/null 2>&1
-    device shell am start -n "$APP/.MainActivity" "$@" >/dev/null 2>&1
+    local attempt
+    for attempt in 1 2; do
+        device shell am force-stop "$APP" >/dev/null 2>&1
+        device shell pm clear "$APP" >/dev/null 2>&1
+        device shell pm grant "$APP" com.termux.permission.RUN_COMMAND >/dev/null 2>&1
+        device shell am start -n "$APP/.MainActivity" "$@" >/dev/null 2>&1
+        if await "activity:created" 15; then
+            return 0
+        fi
+    done
     # A launch that quietly did nothing turns every later check into its own
     # mystery; say it once, here, with the log lines that explain it.
-    if ! await "activity:created" 12; then
-        bad "launch: the app did not start (adb: $(device get-state 2>/dev/null))"
-        device logcat -d -t 400 2>/dev/null \
-            | grep -a 'FATAL\|nativeterminal' | tail -6 | sed 's/^/     /'
-    fi
+    bad "launch: the app did not start after two attempts (adb: $(device get-state 2>/dev/null))"
+    device logcat -d -t 400 2>/dev/null \
+        | grep -a 'FATAL\|nativeterminal' | tail -6 | sed 's/^/     /'
 }
 
 dump() {
@@ -529,8 +535,12 @@ test_pty_is_a_terminal() {
 test_cursor_jumps() {
     launch --ez cursor true
     if ! await "cursor:main-again" 15; then
-        bad "cursor: the demo never finished"
-        return
+        # A fresh install can leave the first demo without its session.
+        launch --ez cursor true
+        if ! await "cursor:main-again" 15; then
+            bad "cursor: the demo never finished"
+            return
+        fi
     fi
 
     local screen
@@ -999,11 +1009,10 @@ test_grid_resize_reaches_the_pty() {
     fi
     local before
     before=$(last_grid)
-    device shell wm size 800x1400 >/dev/null
+    resize_window 0.3
 
     if ! grid_changed "$before" 12; then
         bad "resize: the view's grid did not follow the window (was $before)"
-        restore_display
         return
     fi
     local after cols rows
@@ -1018,7 +1027,6 @@ test_grid_resize_reaches_the_pty() {
     else
         bad "resize: the pty did not follow the view (wanted 'size-now=$rows $cols')"
     fi
-    restore_display
 }
 
 # The other transport: the pty is Termux's, so the size has to travel over the
@@ -1038,10 +1046,9 @@ test_session_resize_follows_the_view() {
     fi
     local before after cols rows
     before=$(last_grid)
-    device shell wm size 800x1400 >/dev/null
+    resize_window 0.3
     if ! grid_changed "$before" 12; then
         bad "session resize: the view's grid did not follow the window (was $before)"
-        restore_display
         return
     fi
     after=$(settled_grid)
@@ -1052,7 +1059,6 @@ test_session_resize_follows_the_view() {
     else
         bad "session resize: Termux's pty did not follow (wanted 'size-now=$rows $cols')"
     fi
-    restore_display
 }
 
 # --- what a service can read --------------------------------------------------
