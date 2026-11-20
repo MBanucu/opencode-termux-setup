@@ -245,6 +245,22 @@ inspect() {
         --es inspect '$1' >/dev/null 2>&1; cat $PROBE_FILES/$1.txt" 2>/dev/null
 }
 
+# Waits for the probe to see at least `minimum` row nodes. The view publishes its
+# rows as the program draws them, so a dump taken the moment the launch evidence
+# line appears can arrive before the first screen does; the row nodes are what
+# this check is about, so they are what it waits for.
+await_rows() {
+    local minimum=${1:-5} seconds=${2:-10} i=0 summary rows
+    while [ "$i" -lt $((seconds * 5)) ]; do
+        summary=$(inspect e2e-rows)
+        rows=$(printf '%s\n' "$summary" | sed -n 's/^rows=//p')
+        [ "${rows:-0}" -ge "$minimum" ] && return 0
+        sleep 0.2
+        i=$((i + 1))
+    done
+    return 1
+}
+
 # Waits for an accessibility event without polling: the probe blocks on a new
 # event off its main thread, and this streams the answer file until the match.
 # $1 needle, $2 seconds, $3 optional event type (WINDOW_STATE, ANNOUNCEMENT...).
@@ -332,16 +348,21 @@ await_windows() {
 
 # Waits for a line in the evidence file; most of these checks are "the app will
 # say this within N seconds, or it will not".
+#
+# The device polls its own file every 100 ms and exits on the match, so a hit
+# costs one adb round trip instead of a `cat` per second - the same trade the
+# instrumented tests make by reading the file the app writes rather than running
+# `logcat -d` on a timer. The host `timeout` is a backstop for a shell that never
+# runs the loop at all.
 await() {
-    local pattern=$1 tries=${2:-15} i=0
-    while [ "$i" -lt "$tries" ]; do
-        if evidence | grep -aqF -- "$pattern"; then
-            return 0
-        fi
-        sleep 1
-        i=$((i + 1))
-    done
-    return 1
+    local pattern=$1 seconds=${2:-15}
+    timeout "$seconds" "$ADB" shell "i=0
+        while [ \$i -lt $((seconds * 10)) ]; do
+            grep -aqF -- '$pattern' '$FILES/evidence.txt' 2>/dev/null && exit 0
+            sleep 0.1
+            i=\$((i + 1))
+        done
+        exit 1" >/dev/null 2>&1
 }
 
 expect() {
@@ -360,16 +381,28 @@ resize_window() {
 # The newest grid the view reported, as CxR.
 last_grid() { evidence | grep -a '^### grid:' | tail -1 | sed 's/.*grid://'; }
 
-# Waits until the view's grid is something other than it was: a window change is
-# a layout, so this is also the wait for the app to have noticed it.
+# How many bytes the evidence has now: a wait that must be answered only by what
+# is written next passes this to grid_changed.
+evidence_bytes() {
+    device shell "wc -c < '$FILES/evidence.txt' 2>/dev/null" | tr -d ' \r'
+}
+
+# Waits until a grid line written after `mark` is something other than `before`:
+# a window change is a layout, so this is also the wait for the app to have
+# noticed it. The mark is taken before the action, because a broadcast is fast
+# enough that the new grid can already be in the file by the time a wait starts.
 grid_changed() {
-    local before=$1 tries=${2:-12} i=0
-    while [ "$i" -lt "$tries" ]; do
-        [ "$(last_grid)" != "$before" ] && return 0
-        sleep 1
-        i=$((i + 1))
-    done
-    return 1
+    local before=$1 mark=${2:-0} seconds=${3:-12}
+    case $mark in ''|*[!0-9]*) mark=0 ;; esac
+    timeout "$seconds" "$ADB" shell "i=0
+        while [ \$i -lt $((seconds * 10)) ]; do
+            tail -c +$((mark + 1)) '$FILES/evidence.txt' 2>/dev/null \
+                | grep -a -o '### grid:[0-9]*x[0-9]*' \
+                | grep -a -q -m1 -v -F -- '### grid:$before' && exit 0
+            sleep 0.1
+            i=\$((i + 1))
+        done
+        exit 1" >/dev/null 2>&1
 }
 
 # The grid once two reads two seconds apart agree. A window resize with the
@@ -394,17 +427,17 @@ settled_grid() {
 }
 
 # A line the evidence has that *starts* with the pattern: output, rather than the
-# shell echoing the command back (which contains the same text).
+# shell echoing the command back (which contains the same text). Polled on the
+# device for the same reason `await` is.
 await_line() {
-    local pattern=$1 tries=${2:-15} i=0
-    while [ "$i" -lt "$tries" ]; do
-        if evidence | grep -aqE -- "^$pattern"; then
-            return 0
-        fi
-        sleep 1
-        i=$((i + 1))
-    done
-    return 1
+    local pattern=$1 seconds=${2:-15}
+    timeout "$seconds" "$ADB" shell "i=0
+        while [ \$i -lt $((seconds * 10)) ]; do
+            grep -aqE -- '^$pattern' '$FILES/evidence.txt' 2>/dev/null && exit 0
+            sleep 0.1
+            i=\$((i + 1))
+        done
+        exit 1" >/dev/null 2>&1
 }
 
 # Every screen section in the evidence, without the raw pty transcript - that
@@ -600,8 +633,8 @@ test_colour_escapes_render() {
         return
     fi
     # The evidence is written as the grid changes; the frame carrying the colours
-    # is the next one.
-    sleep 1
+    # is the next one, and RED-TEXT arriving in the file is that frame's write.
+    await "RED-TEXT" 5 || true
 
     local screen
     screen=$(screen_at colors)
@@ -1007,11 +1040,12 @@ test_grid_resize_reaches_the_pty() {
         bad "resize: the shell never answered stty size"
         return
     fi
-    local before
+    local before mark
     before=$(last_grid)
+    mark=$(evidence_bytes)
     resize_window 0.3
 
-    if ! grid_changed "$before" 12; then
+    if ! grid_changed "$before" "$mark" 12; then
         bad "resize: the view's grid did not follow the window (was $before)"
         return
     fi
@@ -1044,10 +1078,11 @@ test_session_resize_follows_the_view() {
         bad "session resize: the session never answered stty size"
         return
     fi
-    local before after cols rows
+    local before mark after cols rows
     before=$(last_grid)
+    mark=$(evidence_bytes)
     resize_window 0.3
-    if ! grid_changed "$before" 12; then
+    if ! grid_changed "$before" "$mark" 12; then
         bad "session resize: the view's grid did not follow the window (was $before)"
         return
     fi
@@ -1065,6 +1100,9 @@ test_session_resize_follows_the_view() {
 
 test_rows_and_events() {
     launch
+    # The old poll gave the view a second to draw; the wait for launch evidence
+    # does not, so the rows this check reads are waited for explicitly.
+    await_rows 5 10
     local summary rows changed announced actions needle
     summary=$(inspect e2e-rows)
     rows=$(printf '%s\n' "$summary" | sed -n 's/^rows=//p')
