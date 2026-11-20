@@ -1,6 +1,8 @@
 # Test timing history is local to the machine that ran the tests.
 test/.timings.db
 test/recordings/
+# The adb watcher's log and pid file belong to the machine, not the repository.
+test/out/
 android/local.properties
 __pycache__/
 

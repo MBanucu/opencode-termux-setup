@@ -5,10 +5,13 @@
 # here taps a coordinate or types with `input text`.
 #
 #   bash samples/build.sh native-terminal && bash samples/build.sh a11y-probe
-#   bash samples/e2e.sh                 # the fast checks
-#   bash samples/e2e.sh --opencode      # also the TUI (slow, needs opencode)
-#   bash samples/e2e.sh --only tui-echo # just one check
-#   bash samples/e2e.sh --restore       # put back what a dead run left changed
+#   bash samples/e2e.sh                   # the fast checks
+#   bash samples/e2e.sh --opencode        # also the TUI (slow, needs opencode)
+#   bash samples/e2e.sh --only tui-echo   # just one check
+#   bash samples/e2e.sh --only pty,tui-bg # several checks, one install
+#   bash samples/e2e.sh --list            # the check names
+#   bash samples/e2e.sh --quiet           # failures and the summary only
+#   bash samples/e2e.sh --restore         # put back what a dead run left changed
 #
 # The probe service is enabled for the run, and the display size and
 # accessibility settings are put back the way they were found - even when a
@@ -24,20 +27,42 @@ FILES=/sdcard/Android/data/$APP/files
 PROBE_FILES=/sdcard/Android/data/$PROBE/files
 OPENCODE=0
 RESTORE_ONLY=0
+LIST_ONLY=0
+QUIET=0
 ONLY=""
 case "${1:-}" in
     --opencode) OPENCODE=1 ;;
     --restore) RESTORE_ONLY=1 ;;
+    --list) LIST_ONLY=1 ;;
+    --quiet) QUIET=1 ;;
     --only) ONLY=${2:-} ;;
 esac
+# A comma is how a shell user usually writes a list; spaces are how the loop reads it.
+ONLY=${ONLY//,/ }
+START=$SECONDS
+CHECKS_RUN=0
 CHECKS="pty cursor cursor-escapes colour tui tui-echo tui-caret tui-blink tui-bg tui-symbols tui-modes resize rows session session-resize opencode"
 FAIL=0
 
 say() { printf '%s\n' "$*"; }
-ok() { say "ok   $*"; }
+ok() { [ "$QUIET" = 1 ] || say "ok   $*"; }
 bad() { say "FAIL $*"; FAIL=1; }
 
 device() { $ADB "$@"; }
+
+# A dropped wireless session is not a failing check: ask mDNS for the current
+# port before deciding the suite cannot run. The watcher (test/adb-watch.sh)
+# normally keeps this from being needed, but a suite started by hand should not
+# require it.
+ensure_device() {
+    device get-state >/dev/null 2>&1 && return 0
+    local connector
+    connector=$(cd "$here/.." && pwd)/test/adb-connect.py
+    [ -f "$connector" ] || return 1
+    say "no device; asking mDNS for the wireless-debugging port"
+    python3 "$connector" 2>&1 | sed 's/^/  /'
+    device get-state >/dev/null 2>&1
+}
 
 # --- device state -------------------------------------------------------------
 # The suite changes two settings that belong to the phone's owner: the display
@@ -782,21 +807,30 @@ test_tui_caret_is_visible() {
     fi
     # The caret sits after "  > " inside the box, i.e. five columns in from the
     # border; nothing has been typed, so it is over a blank cell.
-    caret_col=$(( $(printf '%s\n' "$row_text" | awk '{ match($0, /^ */); print RLENGTH }') + 5 ))
+    indent=$(printf '%s\n' "$row_text" | awk '{ match($0, /^ */); print RLENGTH }')
+    caret_col=$((indent + 5))
 
-    local shot=samples/out/caret.png means caret_mean blank_mean
-    device exec-out screencap -p > "$shot" 2>/dev/null
-    means=$(cell_means "$shot" "$left" "$top" "$right" "$bottom" "$cols" \
-        "$caret_col" "$((caret_col + 4))")
-    read -r caret_mean blank_mean <<< "$means"
-    read -r caret_mean blank_mean <<< "$means"
+    local shot=samples/out/caret.png means caret_mean=0 blank_mean=999 lit dark
+    local attempt
+    for attempt in 1 2 3 4 5; do
+        device exec-out screencap -p > "$shot" 2>/dev/null
+        means=$(cell_means "$shot" "$left" "$top" "$right" "$bottom" "$cols" \
+            "$caret_col" "$((caret_col + 4))")
+        read -r lit dark <<< "$means"
+        # A frame can land mid-repaint; the most lit sample is the caret.
+        if [ "${lit:-0}" -gt "$caret_mean" ]; then
+            caret_mean=${lit:-0}
+            blank_mean=${dark:-999}
+        fi
+    done
     # The block covers the glyph cell, not the leading between rows, so a lit
-    # cell averages well below the block colour (about 150 of 255) - and a blank
-    # one is about 20.
-    if [ "${caret_mean:-0}" -gt 120 ] && [ "${blank_mean:-999}" -lt 60 ]; then
+    # cell averages well below the block colour (about 150 of 255): measured
+    # here at 96 against a blank 25. The threshold keeps those apart without
+    # demanding a full cell of ink from a block that does not fill one.
+    if [ "${caret_mean:-0}" -gt 80 ] && [ "${blank_mean:-999}" -lt 60 ]; then
         ok "caret: the view draws a block at the input box's cursor ($caret_mean against $blank_mean)"
     else
-        bad "caret: no block at the cursor (cell '${caret_mean:-none}', background '${blank_mean:-none}')"
+        bad "caret: no block at the cursor (cell '${caret_mean:-none}', background '${blank_mean:-none}'; row '$row_text', indent '${indent:-?}', cols '$cols', cell '$caret_col', bounds '$bounds')"
     fi
 }
 
@@ -1128,30 +1162,52 @@ test_entry_page_modes() {
 
 # One check by name, or all of them: the install and the device state are the
 # same either way, because a check that runs alone starts from the same phone.
+wanted() {
+    case " $ONLY " in
+        *" $1 "*) return 0 ;;
+    esac
+    return 1
+}
+
 check() {
     local name=$1
     shift
-    [ -z "$ONLY" ] || [ "$ONLY" = "$name" ] || return 0
+    if [ -n "$ONLY" ] && ! wanted "$name"; then
+        return 0
+    fi
+    local started=$SECONDS
+    CHECKS_RUN=$((CHECKS_RUN + 1))
     "$@"
+    say "  ($name: $((SECONDS - started))s)"
 }
 
 if [ "$ONLY" = opencode ]; then
     OPENCODE=1
 fi
-case " $CHECKS " in
-    *" $ONLY "*) ;;
-    '')
-        # No --only: every check runs, as before.
-        ;;
-    *)
-        printf 'no such check: %s\nchecks: %s\n' "$ONLY" "$CHECKS" >&2
-        exit 2
-        ;;
-esac
 
 if [ "$RESTORE_ONLY" = 1 ]; then
     restore_only
     exit $?
+fi
+
+if [ "$LIST_ONLY" = 1 ]; then
+    printf '%s\n' "$CHECKS"
+    exit 0
+fi
+
+for name in $ONLY; do
+    case " $CHECKS " in
+        *" $name "*) ;;
+        *)
+            printf 'no such check: %s\nchecks: %s\n' "$name" "$CHECKS" >&2
+            exit 2
+            ;;
+    esac
+done
+
+if ! ensure_device; then
+    say "FAIL no device reachable, and mDNS did not name a working port"
+    exit 1
 fi
 
 # A dead run never reached its trap; repair what it left before changing more.
@@ -1183,8 +1239,8 @@ elif [ -z "$ONLY" ]; then
 fi
 
 if [ "$FAIL" = 0 ]; then
-    say "PASS"
+    say "PASS $CHECKS_RUN checks in $((SECONDS - START))s"
 else
-    say "FAILURES"
+    say "FAILURES after $((SECONDS - START))s"
     exit 1
 fi
