@@ -108,6 +108,18 @@ final class Viewport {
         return screen.background(history - screen.historyRows(), col);
     }
 
+    /** The SGR attributes of one visible cell, as {@link CellAttributes} bits. */
+    int attribute(int row, int col) {
+        if (screen.isAlternate()) {
+            return screen.attribute(row, col);
+        }
+        int history = historyRow(row);
+        if (history >= 0 && history < screen.historyRows()) {
+            return screen.historyAttribute(history, col);
+        }
+        return screen.attribute(history - screen.historyRows(), col);
+    }
+
     /** True when the visible row continues on the next one. */
     boolean wrapped(int row) {
         if (screen.isAlternate()) {

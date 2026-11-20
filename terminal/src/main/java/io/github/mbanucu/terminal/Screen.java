@@ -38,12 +38,17 @@ final class Screen implements EscapeParser.Handler {
     /** Background per cell as 0xRRGGBB, or 0 for the view's default. */
     private int[][] mainBg;
     private int[][] altBg;
+    /** SGR attributes per cell, as {@link CellAttributes} bits. */
+    private int[][] mainAttr;
+    private int[][] altAttr;
     /** The buffer being drawn into: {@link #main} or {@link #alt}. */
     private char[][] cells;
     /** The foregrounds of the buffer being drawn into. */
     private int[][] colours;
     /** The backgrounds of the buffer being drawn into. */
     private int[][] backgrounds;
+    /** The SGR attributes of the buffer being drawn into. */
+    private int[][] attributes;
     private final Sgr sgr = new Sgr();
     /** The last character written, for REP: a run of spaces is one REP. */
     private char lastChar = ' ';
@@ -84,11 +89,14 @@ final class Screen implements EscapeParser.Handler {
         altFg = blankColours();
         mainBg = blankColours();
         altBg = blankColours();
+        mainAttr = blankColours();
+        altAttr = blankColours();
         mainWrapped = new boolean[rows];
         altWrapped = new boolean[rows];
         cells = main;
         colours = mainFg;
         backgrounds = mainBg;
+        attributes = mainAttr;
         wrapped = mainWrapped;
         scrollBottom = rows - 1;
     }
@@ -115,11 +123,14 @@ final class Screen implements EscapeParser.Handler {
         altFg = copyColours(altFg, cols, rows, newCols, newRows);
         mainBg = copyColours(mainBg, cols, rows, newCols, newRows);
         altBg = copyColours(altBg, cols, rows, newCols, newRows);
+        mainAttr = copyColours(mainAttr, cols, rows, newCols, newRows);
+        altAttr = copyColours(altAttr, cols, rows, newCols, newRows);
         mainWrapped = copyFlags(mainWrapped, rows, newRows);
         altWrapped = copyFlags(altWrapped, rows, newRows);
         cells = alternate ? alt : main;
         colours = alternate ? altFg : mainFg;
         backgrounds = alternate ? altBg : mainBg;
+        attributes = alternate ? altAttr : mainAttr;
         wrapped = alternate ? altWrapped : mainWrapped;
         cols = newCols;
         rows = newRows;
@@ -195,6 +206,19 @@ final class Screen implements EscapeParser.Handler {
             return 0;
         }
         return colours[row][col];
+    }
+
+    /** The SGR attributes one cell was drawn with, as {@link CellAttributes} bits. */
+    int attribute(int row, int col) {
+        if (row < 0 || row >= rows || col < 0 || col >= cols) {
+            return 0;
+        }
+        return attributes[row][col];
+    }
+
+    /** The SGR attributes one history cell was drawn with. */
+    int historyAttribute(int row, int col) {
+        return scrollback.attribute(row, col);
     }
 
     /** The whole screen, blank rows dropped from the end. */
@@ -581,6 +605,7 @@ final class Screen implements EscapeParser.Handler {
         // for what follows and leaves what is already on screen bright.
         colours[cursorRow][cursorCol] = sgr.drawnForeground();
         backgrounds[cursorRow][cursorCol] = sgr.background();
+        attributes[cursorRow][cursorCol] = sgr.attributes();
         lastChar = c;
         if (cursorCol >= cols - 1) {
             wrapPending = true;
@@ -623,11 +648,13 @@ final class Screen implements EscapeParser.Handler {
                 System.arraycopy(cells[row + 1], 0, cells[row], 0, cols);
                 System.arraycopy(colours[row + 1], 0, colours[row], 0, cols);
                 System.arraycopy(backgrounds[row + 1], 0, backgrounds[row], 0, cols);
+                System.arraycopy(attributes[row + 1], 0, attributes[row], 0, cols);
                 wrapped[row] = wrapped[row + 1];
             }
             Arrays.fill(cells[scrollBottom], ' ');
             Arrays.fill(colours[scrollBottom], 0);
             Arrays.fill(backgrounds[scrollBottom], sgr.background());
+            Arrays.fill(attributes[scrollBottom], 0);
             wrapped[scrollBottom] = false;
         }
     }
@@ -635,7 +662,7 @@ final class Screen implements EscapeParser.Handler {
     /** Copies the top row into history before a full-screen scroll consumes it. */
     private void rememberTopRow() {
         scrollback.add(new HistoryRow(cells[scrollTop].clone(), colours[scrollTop].clone(),
-                backgrounds[scrollTop].clone(), wrapped[scrollTop]));
+                backgrounds[scrollTop].clone(), attributes[scrollTop].clone(), wrapped[scrollTop]));
     }
 
     void scrollDown(int count) {
@@ -644,11 +671,13 @@ final class Screen implements EscapeParser.Handler {
                 System.arraycopy(cells[row - 1], 0, cells[row], 0, cols);
                 System.arraycopy(colours[row - 1], 0, colours[row], 0, cols);
                 System.arraycopy(backgrounds[row - 1], 0, backgrounds[row], 0, cols);
+                System.arraycopy(attributes[row - 1], 0, attributes[row], 0, cols);
                 wrapped[row] = wrapped[row - 1];
             }
             Arrays.fill(cells[scrollTop], ' ');
             Arrays.fill(colours[scrollTop], 0);
             Arrays.fill(backgrounds[scrollTop], sgr.background());
+            Arrays.fill(attributes[scrollTop], 0);
             wrapped[scrollTop] = false;
         }
     }
@@ -676,6 +705,9 @@ final class Screen implements EscapeParser.Handler {
             for (int[] row : backgrounds) {
                 Arrays.fill(row, sgr.background());
             }
+            for (int[] row : attributes) {
+                Arrays.fill(row, 0);
+            }
             Arrays.fill(wrapped, false);
             return;
         }
@@ -684,20 +716,24 @@ final class Screen implements EscapeParser.Handler {
                 Arrays.fill(cells[row], ' ');
                 Arrays.fill(colours[row], 0);
                 Arrays.fill(backgrounds[row], sgr.background());
+                Arrays.fill(attributes[row], 0);
                 wrapped[row] = false;
             }
             Arrays.fill(cells[cursorRow], 0, Math.min(cols, cursorCol + 1), ' ');
             Arrays.fill(colours[cursorRow], 0, Math.min(cols, cursorCol + 1), 0);
             Arrays.fill(backgrounds[cursorRow], 0, Math.min(cols, cursorCol + 1), sgr.background());
+            Arrays.fill(attributes[cursorRow], 0, Math.min(cols, cursorCol + 1), 0);
             return;
         }
         Arrays.fill(cells[cursorRow], cursorCol, cols, ' ');
         Arrays.fill(colours[cursorRow], cursorCol, cols, 0);
         Arrays.fill(backgrounds[cursorRow], cursorCol, cols, sgr.background());
+        Arrays.fill(attributes[cursorRow], cursorCol, cols, 0);
         for (int row = cursorRow + 1; row < rows; row++) {
             Arrays.fill(cells[row], ' ');
             Arrays.fill(colours[row], 0);
             Arrays.fill(backgrounds[row], sgr.background());
+            Arrays.fill(attributes[row], 0);
             wrapped[row] = false;
         }
     }
@@ -707,15 +743,18 @@ final class Screen implements EscapeParser.Handler {
             Arrays.fill(cells[cursorRow], ' ');
             Arrays.fill(colours[cursorRow], 0);
             Arrays.fill(backgrounds[cursorRow], sgr.background());
+            Arrays.fill(attributes[cursorRow], 0);
             wrapped[cursorRow] = false;
         } else if (mode == 1) {
             Arrays.fill(cells[cursorRow], 0, Math.min(cols, cursorCol + 1), ' ');
             Arrays.fill(colours[cursorRow], 0, Math.min(cols, cursorCol + 1), 0);
             Arrays.fill(backgrounds[cursorRow], 0, Math.min(cols, cursorCol + 1), sgr.background());
+            Arrays.fill(attributes[cursorRow], 0, Math.min(cols, cursorCol + 1), 0);
         } else {
             Arrays.fill(cells[cursorRow], cursorCol, cols, ' ');
             Arrays.fill(colours[cursorRow], cursorCol, cols, 0);
             Arrays.fill(backgrounds[cursorRow], cursorCol, cols, sgr.background());
+            Arrays.fill(attributes[cursorRow], cursorCol, cols, 0);
         }
     }
 
@@ -724,6 +763,7 @@ final class Screen implements EscapeParser.Handler {
         Arrays.fill(cells[cursorRow], cursorCol, end, ' ');
         Arrays.fill(colours[cursorRow], cursorCol, end, 0);
         Arrays.fill(backgrounds[cursorRow], cursorCol, end, sgr.background());
+        Arrays.fill(attributes[cursorRow], cursorCol, end, 0);
     }
 
     void deleteChars(int count) {
@@ -732,10 +772,13 @@ final class Screen implements EscapeParser.Handler {
         System.arraycopy(row, end, row, cursorCol, cols - end);
         System.arraycopy(colours[cursorRow], end, colours[cursorRow], cursorCol, cols - end);
         System.arraycopy(backgrounds[cursorRow], end, backgrounds[cursorRow], cursorCol, cols - end);
+        System.arraycopy(attributes[cursorRow], end, attributes[cursorRow], cursorCol, cols - end);
         Arrays.fill(row, cols - Math.min(count, cols - cursorCol), cols, ' ');
         Arrays.fill(colours[cursorRow], cols - Math.min(count, cols - cursorCol), cols, 0);
         Arrays.fill(backgrounds[cursorRow], cols - Math.min(count, cols - cursorCol), cols,
                 sgr.background());
+        Arrays.fill(attributes[cursorRow], cols - Math.min(count, cols - cursorCol), cols,
+                0);
     }
 
     void insertChars(int count) {
@@ -746,9 +789,12 @@ final class Screen implements EscapeParser.Handler {
                 cursorCol + shift, cols - cursorCol - shift);
         System.arraycopy(backgrounds[cursorRow], cursorCol, backgrounds[cursorRow],
                 cursorCol + shift, cols - cursorCol - shift);
+        System.arraycopy(attributes[cursorRow], cursorCol, attributes[cursorRow],
+                cursorCol + shift, cols - cursorCol - shift);
         Arrays.fill(row, cursorCol, cursorCol + shift, ' ');
         Arrays.fill(colours[cursorRow], cursorCol, cursorCol + shift, 0);
         Arrays.fill(backgrounds[cursorRow], cursorCol, cursorCol + shift, sgr.background());
+        Arrays.fill(attributes[cursorRow], cursorCol, cursorCol + shift, 0);
     }
 
     void insertLines(int count) {
@@ -757,11 +803,13 @@ final class Screen implements EscapeParser.Handler {
                 System.arraycopy(cells[row - 1], 0, cells[row], 0, cols);
                 System.arraycopy(colours[row - 1], 0, colours[row], 0, cols);
                 System.arraycopy(backgrounds[row - 1], 0, backgrounds[row], 0, cols);
+                System.arraycopy(attributes[row - 1], 0, attributes[row], 0, cols);
                 wrapped[row] = wrapped[row - 1];
             }
             Arrays.fill(cells[cursorRow], ' ');
             Arrays.fill(colours[cursorRow], 0);
             Arrays.fill(backgrounds[cursorRow], sgr.background());
+            Arrays.fill(attributes[cursorRow], 0);
             wrapped[cursorRow] = false;
         }
     }
@@ -772,11 +820,13 @@ final class Screen implements EscapeParser.Handler {
                 System.arraycopy(cells[row + 1], 0, cells[row], 0, cols);
                 System.arraycopy(colours[row + 1], 0, colours[row], 0, cols);
                 System.arraycopy(backgrounds[row + 1], 0, backgrounds[row], 0, cols);
+                System.arraycopy(attributes[row + 1], 0, attributes[row], 0, cols);
                 wrapped[row] = wrapped[row + 1];
             }
             Arrays.fill(cells[scrollBottom], ' ');
             Arrays.fill(colours[scrollBottom], 0);
             Arrays.fill(backgrounds[scrollBottom], sgr.background());
+            Arrays.fill(attributes[scrollBottom], 0);
             wrapped[scrollBottom] = false;
         }
     }
@@ -795,6 +845,7 @@ final class Screen implements EscapeParser.Handler {
             cells = alt;
             colours = altFg;
             backgrounds = altBg;
+            attributes = altAttr;
             wrapped = altWrapped;
             for (char[] row : alt) {
                 Arrays.fill(row, ' ');
@@ -805,6 +856,9 @@ final class Screen implements EscapeParser.Handler {
             for (int[] row : altBg) {
                 Arrays.fill(row, 0);
             }
+            for (int[] row : altAttr) {
+                Arrays.fill(row, 0);
+            }
             Arrays.fill(altWrapped, false);
             cursorRow = 0;
             cursorCol = 0;
@@ -813,6 +867,7 @@ final class Screen implements EscapeParser.Handler {
             cells = main;
             colours = mainFg;
             backgrounds = mainBg;
+            attributes = mainAttr;
             wrapped = mainWrapped;
             cursorRow = savedRow;
             cursorCol = savedCol;

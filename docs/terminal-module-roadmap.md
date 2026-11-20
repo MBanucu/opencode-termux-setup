@@ -190,10 +190,18 @@ the DCS termcap answer and wiring the app's `LiveStream` write path remain.
 
 ### 1.7 Remaining `SGR`
 
-- [ ] Underline, reverse, italic, dim, strikethrough and hidden, as far as the
+- [x] Underline, reverse, italic, dim, strikethrough and hidden, as far as the
   app's pages use them.
-- [ ] Keep 16/256/truecolor and bold-brightening behaviour.
-- [ ] Tests for each attribute and for reset.
+- [x] Keep 16/256/truecolor and bold-brightening behaviour; SGR 22 ends bold
+  and dim together.
+- [x] Tests for each attribute and for reset, plus attributes surviving
+  scrollback and a resize.
+
+Model state: every attribute above is parsed into `CellAttributes` bits, stored
+per cell (and per history cell), and drawn by `TerminalView` — reverse swaps the
+cell's colours, dim mixes the glyph with its background, italic selects an
+italic face, and underline and strikethrough are drawn as lines. `AttributeTest`
+covers each code, its reset, `SGR 0`, history and resize.
 
 ### 1.8 Performance
 

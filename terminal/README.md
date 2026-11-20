@@ -15,9 +15,10 @@ comparison with xterm.js in a WebView, is
 | type | role |
 |---|---|
 | `TerminalView` | the view: grid, rendering, `AccessibilityNodeProvider`, `InputConnection`, announcements |
-| `Screen` | the grid: the ECMA-48 subset a TUI uses — alternate screen, cursor addressing, erases, insert/delete, scroll regions, SGR foreground and background. Package-private; not part of the API |
-| `HistoryRow` | one row of primary-screen scrollback, with the colours of its cells. Package-private |
+| `Screen` | the grid: the ECMA-48 subset a TUI uses — alternate screen, cursor addressing, erases, insert/delete, scroll regions, SGR colour and attributes. Package-private; not part of the API |
+| `HistoryRow` | one row of primary-screen scrollback, with the colours and SGR attributes of its cells. Package-private |
 | `AnsiPalette` | the 16-colour palette, the 256-colour cube and bold brightening. Package-private |
+| `CellAttributes` | the per-cell SGR bits the view draws differently: underline, reverse, dim, italic, strikethrough, hidden. Package-private |
 | `Viewport` | the window over the history and the live grid: scroll offset, clamping, follow-at-bottom. Package-private |
 | `Selection` | an inclusive cell range over the viewport, and the text it copies with hard breaks kept and wrapped rows joined. Package-private |
 | `KeyEncoder` | the bytes a hardware key sends, normal or application-cursor mode. Package-private |
@@ -92,9 +93,9 @@ and the viewport with `src/test`, then runs them on the JVM. The screen checks
 cover cursor addressing, erases,
 insert/delete, scroll regions, primary-screen scrollback (limits, colours,
 resize, alternate-screen isolation and `ED 3`),
-the alternate screen, wrapping, SGR foreground and background colour (16, 256
-and truecolor, and `1`
-brightening a foreground), the
+the alternate screen, wrapping, SGR colour (16, 256 and truecolor, `1`
+brightening a foreground) and the other attributes (underline, reverse, dim,
+italic, strikethrough, hidden), the
 caret (DEC mode 25, synchronized updates, DECSCUSR style and DEC mode 12 blinking),
 and the sequences that must print nothing (OSC titles and DCS payloads, cursor
 visibility),
@@ -102,7 +103,9 @@ including escapes split across two `feed` calls. The viewport checks cover
 scrolling into history, clamping at both ends, output while scrolled back not
 moving the row being read, the alternate screen resetting the view, `ED 3`, and
 a 3000-line history. The selection checks cover inclusive ranges, backwards
-drags, hard breaks versus wrapped rows, scrollback and clamping. The key checks cover each named
+drags, hard breaks versus wrapped rows, scrollback and clamping. The attribute
+checks cover every attribute code, its reset, `SGR 0`, and attributes surviving
+history and a resize. The key checks cover each named
 sequence, application-cursor mode, and the control/escape forms. The reply checks cover every
 answer and queries split across feeds. They need no
 device, no Gradle and no test framework, because the models are plain Java. The view itself needs a device
@@ -110,9 +113,9 @@ and is covered by `samples/e2e.sh`.
 
 ## What it is not
 
-- **Not a VT emulator.** `SGR` foreground and background colour are drawn — 16,
-  256 and truecolor, with `1` brightening a palette foreground — but underline,
-  reverse and the rest are dropped. It keeps a primary-screen scrollback (the
+- **Not a VT emulator.** `SGR` colour is drawn — 16, 256 and truecolor, with
+  `1` brightening a palette foreground — and so are underline, reverse, dim,
+  italic, strikethrough and hidden. It keeps a primary-screen scrollback (the
   alternate screen is the program's own) and a cell-range selection model that
   copies hard breaks and wrapped rows correctly, but it has no long-press
   handles, clipboard wiring, mouse or bracketed-paste state. Enough to draw a TUI and read it; not enough to be

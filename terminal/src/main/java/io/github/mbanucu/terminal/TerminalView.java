@@ -70,6 +70,8 @@ public final class TerminalView extends View {
     private static final int MIN_COLUMNS = 80;
     /** What uncoloured text is drawn in. */
     private static final int TEXT_COLOR = 0xFFDCDCDC;
+    /** The page's own colour, behind every cell. */
+    private static final int WINDOW_BACKGROUND = 0xFF101418;
 
     private final Screen screen = new Screen(80, 24);
     private final Viewport viewport = new Viewport(screen);
@@ -79,6 +81,8 @@ public final class TerminalView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     /** The bundled monospace face, or the system one when the host has no asset. */
     private final Typeface typeface;
+    /** The italic face, made once; the bundled font has no italic file. */
+    private Typeface italicTypeface;
     private float cellHeight = 1;
     private float cellWidth = 1;
     private Listener listener;
@@ -130,7 +134,7 @@ public final class TerminalView extends View {
         paint.setTextSize(getResources().getDisplayMetrics().scaledDensity * 9f);
         cellWidth = Math.max(1f, paint.measureText("M"));
         paint.setColor(TEXT_COLOR);
-        setBackgroundColor(Color.rgb(0x10, 0x14, 0x18));
+        setBackgroundColor(WINDOW_BACKGROUND);
     }
 
     /**
@@ -257,22 +261,44 @@ public final class TerminalView extends View {
             float baseline = row * cellHeight - paint.ascent();
             // A background is a filled cell whether or not there is a glyph in
             // it: a TUI's box is spaces with a colour behind them, and `line()`
-            // has already trimmed those spaces away.
+            // has already trimmed those spaces away. Reverse swaps it with the
+            // text colour.
             for (int col = 0; col < screen.cols(); col++) {
-                int bg = viewport.background(row, col);
-                if (bg != 0) {
-                    paint.setColor(0xFF000000 | bg);
+                int attributes = viewport.attribute(row, col);
+                int fill = fillColour(attributes, viewport.foreground(row, col),
+                        viewport.background(row, col));
+                if (fill != 0) {
+                    paint.setColor(fill);
                     canvas.drawRect(col * cellWidth, row * cellHeight,
                             (col + 1) * cellWidth, (row + 1) * cellHeight, paint);
                 }
             }
             for (int col = 0; col < line.length(); col++) {
-                // SGR carries the foreground per cell; 0 means the default.
-                int fg = viewport.foreground(row, col);
-                paint.setColor(fg == 0 ? TEXT_COLOR : 0xFF000000 | fg);
+                int attributes = viewport.attribute(row, col);
+                if (CellAttributes.has(attributes, CellAttributes.HIDDEN)) {
+                    continue;
+                }
+                // SGR carries the foreground and its attributes per cell; 0 means
+                // the default.
+                int colour = textColour(attributes, viewport.foreground(row, col),
+                        viewport.background(row, col));
+                paint.setColor(colour);
+                paint.setTypeface(CellAttributes.has(attributes, CellAttributes.ITALIC)
+                        ? italicTypeface() : typeface);
                 canvas.drawText(line, col, col + 1, col * cellWidth, baseline, paint);
+                if (CellAttributes.has(attributes, CellAttributes.UNDERLINE)) {
+                    paint.setColor(colour);
+                    canvas.drawRect(col * cellWidth, baseline + 1,
+                            (col + 1) * cellWidth, baseline + 2, paint);
+                }
+                if (CellAttributes.has(attributes, CellAttributes.STRIKETHROUGH)) {
+                    float y = row * cellHeight + cellHeight / 2;
+                    paint.setColor(colour);
+                    canvas.drawRect(col * cellWidth, y, (col + 1) * cellWidth, y + 1, paint);
+                }
             }
         }
+        paint.setTypeface(typeface);
         paint.setColor(TEXT_COLOR);
         // A full-screen program leaves the caret to the terminal: it says whether
         // to show one with DEC mode 25, and the view draws it where the program
@@ -328,6 +354,42 @@ public final class TerminalView extends View {
             glyph.setColor(Color.rgb(0x10, 0x14, 0x18));
             canvas.drawText(under, col, col + 1, col * cellWidth, rowBaseline, glyph);
         }
+    }
+
+    /** The colour a cell's background is filled with, after reverse. */
+    private int fillColour(int attributes, int fg, int bg) {
+        if (CellAttributes.has(attributes, CellAttributes.REVERSE)) {
+            return fg == 0 ? TEXT_COLOR : 0xFF000000 | fg;
+        }
+        return bg == 0 ? 0 : 0xFF000000 | bg;
+    }
+
+    /** The colour a cell's glyph is drawn with, after reverse and dim. */
+    private int textColour(int attributes, int fg, int bg) {
+        int behind = bg == 0 ? WINDOW_BACKGROUND : 0xFF000000 | bg;
+        int colour;
+        if (CellAttributes.has(attributes, CellAttributes.REVERSE)) {
+            colour = behind;
+            behind = fg == 0 ? TEXT_COLOR : 0xFF000000 | fg;
+        } else {
+            colour = fg == 0 ? TEXT_COLOR : 0xFF000000 | fg;
+        }
+        return CellAttributes.has(attributes, CellAttributes.DIM) ? dim(colour, behind) : colour;
+    }
+
+    /** Half way from a glyph to what is behind it. */
+    private static int dim(int colour, int behind) {
+        return Color.rgb((Color.red(colour) + Color.red(behind)) / 2,
+                (Color.green(colour) + Color.green(behind)) / 2,
+                (Color.blue(colour) + Color.blue(behind)) / 2);
+    }
+
+    /** The italic face, made on first use. */
+    private Typeface italicTypeface() {
+        if (italicTypeface == null) {
+            italicTypeface = Typeface.create(typeface, Typeface.ITALIC);
+        }
+        return italicTypeface;
     }
 
     /** True while a blinking caret is what the program asked for. */

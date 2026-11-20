@@ -5,14 +5,20 @@ package io.github.mbanucu.terminal;
  * brightening a palette colour.
  *
  * <p>Separate from {@link Screen} so the colour codes live with their state and
- * the grid only asks what to paint a cell with. 16 colours, 256 and truecolor;
- * underline, reverse and the rest are still dropped.
+ * the grid only asks what to paint a cell with: 16 colours, 256 and truecolor,
+ * bold, dim, underline, reverse, italic, strikethrough and hidden.
  */
 final class Sgr {
 
     private int foreground;
     private int background;
     private boolean bold;
+    private boolean dim;
+    private boolean underline;
+    private boolean reverse;
+    private boolean italic;
+    private boolean strikethrough;
+    private boolean hidden;
 
     /** Applies one SGR sequence; no parameters means a full reset. */
     void apply(String[] parts) {
@@ -38,8 +44,32 @@ final class Sgr {
                 reset();
             } else if (code == 1) {
                 bold = true;
+            } else if (code == 2) {
+                dim = true;
             } else if (code == 22) {
+                // SGR 22 is "normal intensity": it ends bold and dim together.
                 bold = false;
+                dim = false;
+            } else if (code == 3) {
+                italic = true;
+            } else if (code == 23) {
+                italic = false;
+            } else if (code == 4) {
+                underline = true;
+            } else if (code == 24) {
+                underline = false;
+            } else if (code == 7) {
+                reverse = true;
+            } else if (code == 27) {
+                reverse = false;
+            } else if (code == 8) {
+                hidden = true;
+            } else if (code == 28) {
+                hidden = false;
+            } else if (code == 9) {
+                strikethrough = true;
+            } else if (code == 29) {
+                strikethrough = false;
             } else if (code == 39) {
                 foreground = 0;
             } else if (code == 49) {
@@ -64,10 +94,40 @@ final class Sgr {
         return bold ? AnsiPalette.brighten(foreground) : foreground;
     }
 
+    /** The attributes in force, as {@link CellAttributes} bits. */
+    int attributes() {
+        int bits = 0;
+        if (underline) {
+            bits |= CellAttributes.UNDERLINE;
+        }
+        if (reverse) {
+            bits |= CellAttributes.REVERSE;
+        }
+        if (dim) {
+            bits |= CellAttributes.DIM;
+        }
+        if (italic) {
+            bits |= CellAttributes.ITALIC;
+        }
+        if (strikethrough) {
+            bits |= CellAttributes.STRIKETHROUGH;
+        }
+        if (hidden) {
+            bits |= CellAttributes.HIDDEN;
+        }
+        return bits;
+    }
+
     private void reset() {
         foreground = 0;
         background = 0;
         bold = false;
+        dim = false;
+        underline = false;
+        reverse = false;
+        italic = false;
+        strikethrough = false;
+        hidden = false;
     }
 
     /**
@@ -107,8 +167,15 @@ final class Sgr {
         if (index >= parts.length || parts[index].isEmpty()) {
             return fallback;
         }
+        // SGR 4:3 and friends carry a subparameter after a colon; the
+        // attribute itself is the part before it.
+        String value = parts[index];
+        int colon = value.indexOf(':');
+        if (colon >= 0) {
+            value = value.substring(0, colon);
+        }
         try {
-            return Integer.parseInt(parts[index]);
+            return Integer.parseInt(value);
         } catch (NumberFormatException notANumber) {
             return fallback;
         }
