@@ -39,6 +39,14 @@ dir=$here/$app
         cp -r "$root/android/app/src/main/assets/xterm" "$dir/assets/xterm"
     fi
 }
+[ -f "$dir/assets/terminal-mono.ttf" ] || {
+    # TerminalView loads this from its host's assets. The app ships the one copy
+    # the WebView page already uses; a sample gets it at build time the same way
+    # it gets xterm.js.
+    if [ -d "$dir/assets" ] && [ -f "$root/android/app/src/main/assets/terminal-mono.ttf" ]; then
+        cp "$root/android/app/src/main/assets/terminal-mono.ttf" "$dir/assets/terminal-mono.ttf"
+    fi
+}
 
 work=$here/out/$app
 rm -rf "$work"

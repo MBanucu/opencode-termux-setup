@@ -260,7 +260,9 @@ final class Screen {
             }
             return 0;
         }
-        if (kind == ']') {
+        if (kind == ']' || kind == 'P' || kind == 'X' || kind == '^' || kind == '_') {
+            // OSC, DCS, SOS, PM and APC are strings, not text. opencode asks its
+            // termcap question with DCS (+q4d73); the payload is not a row.
             for (int j = index + 2; j < length; j++) {
                 char c = pending.charAt(j);
                 if (c == 0x07) {
@@ -322,6 +324,11 @@ final class Screen {
                     setAlternate(last == 'h');
                 }
             }
+            return;
+        }
+        if (privateMode) {
+            // DA/DSR and the kitty keyboard query are private sequences, not
+            // cursor saves: CSI ? u must not read as CSI u.
             return;
         }
         switch (last) {

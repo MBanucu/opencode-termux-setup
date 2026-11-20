@@ -8,6 +8,8 @@ __pycache__/
 # build time so the repository keeps one copy of it.
 samples/out/
 samples/xterm-a11y/assets/xterm/
+# The terminal font is copied into a sample's assets at build time, like xterm.
+samples/*/assets/terminal-mono.ttf
 .tmp/
 
 # A standalone compile of the terminal module.

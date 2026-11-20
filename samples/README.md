@@ -132,9 +132,9 @@ At 80x24 — above the 60-column floor opencode drops its footer below — the v
 shows the logo, `Ask anything… "Fix broken tests"`, `Build auto · Big Pickle Default
 / OpenCode`, the composer border, `tab agents  ctrl+p commands` and `2.3.2`,and the probe reads the same lines as row nodes: 26 rows, 60 `CONTENT_CHANGED`, and 2
 coalesced `ANNOUNCEMENT`s in one dump. The caret in the composer is drawn where
-opencode puts it, because the view follows DEC mode 25. Only text and `SGR`
-foreground are carried: bold and the rest are dropped, and the block-glyph logo is
-punctuation when spoken.
+opencode puts it, because the view follows DEC mode 25. Text and `SGR` foreground and background are carried
+(bold brightens a palette colour); underline and the rest are dropped, and the
+block-glyph logo is punctuation when spoken.
 
 Nothing is typed in this mode by the suite — opencode's composer is not a shell
 prompt. Manually, keys do reach it: once a program owns the alternate screen the
@@ -213,6 +213,40 @@ both filled by writing spaces in a colour pair. The fill is why the grid keeps a
 background per cell: a row of spaces reads as empty text, but on screen it is a
 coloured rectangle. The end-to-end suite screenshots it and counts the pixels of
 both colours, in the areas the row nodes say the boxes occupy.
+
+### Entry-page symbols and modes: what opencode actually writes
+
+`opencode`'s entry page was captured from its own pty at 100x30, and again at
+80x24 in Termux's own GUI. It draws with seven non-ASCII glyphs — `▀` (U+2580),
+`█` (U+2588), `▄` (U+2584), `┃` (U+2503), `╹` (U+2579), `…` (U+2026) and `·`
+(U+00B7) — and with truecolor `SGR` only (a grey-to-white #808080→#FFFFFF logo
+gradient, `fg` #EEEEEE, #808080, a blue #5C9CF5 composer gutter; `bg` #0A0A0A,
+#1E1E1E), plus bold. Around the paint it
+switches to the alternate screen, brackets the repaint with `?2026`, hides and
+shows the caret, enables bracketed paste, mouse reporting (`?1000/1002/1003/1006`)
+and focus events (`?2031`), and asks the terminal questions: `CSI c` (DA),
+`CSI 6n` (cursor position), `CSI ? u` (kitty keyboard), a `DCS +q` termcap pair,
+and `OSC 10`/`11` colour queries.
+
+Two sample TUIs put that list on the device, so the view can be checked without
+waiting for opencode:
+
+```bash
+adb shell am start -n io.github.mbanucu.samples.nativeterminal/.MainActivity \
+    --ez symbols true     # the seven glyphs and the truecolor fills
+adb shell am start -n io.github.mbanucu.samples.nativeterminal/.MainActivity \
+    --ez modes true       # the modes and queries, then one sentinel row
+```
+
+`tui-symbols.py` is the page in miniature: the block logo, the composer's `┃`
+gutter, `╹▀▀▀▀`, `Ask anything…` and the palette above. Two more extras run the
+miniature and opencode in a *foreground* Termux session, so both are drawn by
+Termux's own renderer and the screenshots can be compared directly:
+`--ez symbolsForeground true` and `--ez opencodeForeground true`. The suite reads the rows
+for every glyph and counts #0A0A0A and #1E1E1E in a screenshot.
+`tui-modes.py` sends the mode set and every query, then draws `MODES-OK`; the
+suite requires that sentinel, requires that no payload (`1049`, `2026`,
+`P+q4d73`, `1337`, …) appears as text, and quits with `q`.
 
 ## a11y-probe — an accessibility service as a measuring instrument
 
@@ -356,4 +390,6 @@ bash samples/e2e.sh --restore
 | tui caret | the view draws a block at the cursor in that input box, checked on the pixels |
 | tui blink | the box TUI's caret blinks: its cell is lit in some frames and dark in others |
 | tui bg | a TUI's boxes are filled with SGR 44 and 43, counted in the screenshot |
+| tui symbols | the entry page's seven glyphs are row text, and its truecolor fills are in the screenshot |
+| tui modes | the entry page's modes and queries leave no text behind, and `q` still quits |
 | `--opencode` | the TUI's own text is in the tree, and it announces |

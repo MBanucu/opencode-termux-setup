@@ -13,6 +13,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.view.inputmethod.InputMethodManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -122,6 +123,17 @@ public final class MainActivity extends Activity {
         // `adb shell input text` land in its InputConnection without a tap.
         terminal.requestFocus();
 
+        // A replay and a live entry page are measured, not typed into: with the
+        // IME out of the way the view's grid is the display's, not a function of
+        // whether the keyboard happened to dock, float or not appear at all.
+        boolean noIme = getIntent() != null && getIntent().getBooleanExtra("noIme", false);
+        if (noIme) {
+            terminal.setFocusable(false);
+            terminal.setFocusableInTouchMode(false);
+            ui.postDelayed(this::hideIme, 400);
+            ui.postDelayed(this::hideIme, 1200);
+        }
+
         probeForeignPrograms();
 
         boolean fake = getIntent() != null && getIntent().getBooleanExtra("fake", false);
@@ -133,11 +145,55 @@ public final class MainActivity extends Activity {
         boolean echo = getIntent() != null && getIntent().getBooleanExtra("echo", false);
         boolean background = getIntent() != null
                 && getIntent().getBooleanExtra("background", false);
+        boolean symbols = getIntent() != null
+                && getIntent().getBooleanExtra("symbols", false);
+        boolean modes = getIntent() != null
+                && getIntent().getBooleanExtra("modes", false);
+        boolean symbolsForeground = getIntent() != null
+                && getIntent().getBooleanExtra("symbolsForeground", false);
+        boolean opencodeForeground = getIntent() != null
+                && getIntent().getBooleanExtra("opencodeForeground", false);
+        boolean recordEntry = getIntent() != null
+                && getIntent().getBooleanExtra("recordEntry", false);
+        boolean replayTermux = getIntent() != null
+                && getIntent().getBooleanExtra("replayTermux", false);
+        boolean replay = getIntent() != null
+                && getIntent().getBooleanExtra("replay", false);
+        boolean gridProbe = getIntent() != null
+                && getIntent().getBooleanExtra("gridProbe", false);
+        boolean opencodeEntry = getIntent() != null
+                && getIntent().getBooleanExtra("opencodeEntry", false);
+        boolean width = getIntent() != null
+                && getIntent().getBooleanExtra("width", false);
+        boolean widthForeground = getIntent() != null
+                && getIntent().getBooleanExtra("widthForeground", false);
         sizeProbes = getIntent() == null || getIntent().getBooleanExtra("sizeProbes", true);
-        if (echo) {
+        if (gridProbe) {
+            startGridProbe();
+        } else if (opencodeEntry) {
+            startOpencodeEntryHere();
+        } else if (recordEntry) {
+            recordEntryPage();
+        } else if (replayTermux) {
+            replayEntryPageInTermux();
+        } else if (replay) {
+            replayEntryPageHere();
+        } else if (widthForeground) {
+            startTuiInTermux("tui-width.py", "width test in Termux");
+        } else if (width) {
+            startTui("tui-width.py", "width-tui");
+        } else if (echo) {
             startTui("tui-echo.py", "echo-tui");
         } else if (background) {
             startTui("tui-bg.py", "bg-tui");
+        } else if (symbols) {
+            startTui("tui-symbols.py", "symbols-tui");
+        } else if (symbolsForeground) {
+            startSymbolsInTermux();
+        } else if (opencodeForeground) {
+            startOpencodeInTermux();
+        } else if (modes) {
+            startTui("tui-modes.py", "modes-tui");
         } else if (tui) {
             startTui("tui.py", "tui");
         } else if (colours) {
@@ -154,6 +210,18 @@ public final class MainActivity extends Activity {
             startShell();
         }
         writeEvidence("activity:created");
+    }
+
+    /** Takes focus away from the terminal and hides the IME, for a measured grid. */
+    private void hideIme() {
+        if (terminal == null) {
+            return;
+        }
+        terminal.clearFocus();
+        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(terminal.getWindowToken(), 0);
+        }
     }
 
     private Button button(String label, android.view.View.OnClickListener click) {
@@ -264,6 +332,154 @@ public final class MainActivity extends Activity {
         }, "tui-driver");
         driver.setDaemon(true);
         driver.start();
+    }
+
+    /**
+     * Runs the entry-page TUI in a foreground Termux session, not in this view.
+     *
+     * <p>It is the same script the `symbols` extra feeds to this view, executed
+     * by Termux's own emulator: a screenshot of it is what a Termux user sees,
+     * so the miniature and opencode can be compared in one renderer.
+     */
+    private void startSymbolsInTermux() {
+        startTuiInTermux("tui-symbols.py", "symbols in Termux");
+    }
+
+    /** Runs one of this sample's TUI assets in a foreground Termux session. */
+    private void startTuiInTermux(String asset, String label) {
+        String script = readAsset(asset);
+        if (script == null) {
+            startFake();
+            return;
+        }
+        String command = "python3 -c \"import base64;exec(base64.b64decode('"
+                + Base64.encodeToString(script.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP)
+                + "'))\"";
+        startTermuxForeground(command, label);
+    }
+
+    /**
+     * opencode itself, in a foreground Termux session.
+     *
+     * <p>A fresh home keeps the real one's session list out of the picture: the
+     * entry page is what is being looked at, not whatever was open last.
+     */
+    private void startOpencodeInTermux() {
+        String dir = "/data/data/com.termux/files/home/.opencode-page";
+        startTermuxForeground("clear; mkdir -p " + dir
+                + " && HOME=" + dir + " XDG_CONFIG_HOME=" + dir + "/config"
+                + " XDG_DATA_HOME=" + dir + "/data opencode", "opencode entry page");
+    }
+
+    /** Termux's own external files dir: both Termux and adb can read it. */
+    private static final String TERMUX_FILES =
+            "/sdcard/Android/data/com.termux/files";
+    /** A fresh home, so opencode shows its entry page, not a session list. */
+    private static final String ENTRY_HOME =
+            "/data/data/com.termux/files/home/.opencode-page";
+
+    /**
+     * Records opencode's entry page as the bytes its pty produced.
+     *
+     * <p>{@code script} puts opencode on a pty of its own while Termux draws the
+     * same bytes it forwards, and it writes them to a typescript. The size is
+     * taken from the pty at the same moment, so a replay can be given the grid
+     * the page was drawn for. A fresh home makes the page what is drawn, not the
+     * window's last session.
+     */
+    private void recordEntryPage() {
+        String home = "/data/data/com.termux/files/home/.opencode-page80";
+        // Its own managed-service port: a second opencode on the port the
+        // running session owns exits before it draws anything.
+        String env = "env HOME=" + home + " XDG_CONFIG_HOME=" + home
+                + "/config XDG_DATA_HOME=" + home + "/data";
+        String command = "sleep 5; mkdir -p " + home + " " + TERMUX_FILES
+                + "; stty size > " + TERMUX_FILES + "/opencode-grid.txt"
+                + "; " + env + " opencode service set port 53112 >/dev/null 2>&1"
+                + "; script -q -f -c \"" + env + " opencode\" "
+                + TERMUX_FILES + "/opencode-typescript.bin; sleep 600";
+        startTermuxForeground(command, "record opencode entry page");
+    }
+
+    /**
+     * Publishes the pty's grid every two seconds, for measuring a `wm size`
+     * change: the pty's answer is the grid the renderer actually has.
+     */
+    private void startGridProbe() {
+        String command = "sleep 3; stty -echo; for i in $(seq 1 90); do stty size > "
+                + TERMUX_FILES + "/probe-grid.txt; sleep 2; done";
+        startTermuxForeground(command, "grid probe");
+    }
+
+    /**
+     * opencode's entry page, live, drawn by {@link TerminalView} at the grid the
+     * view reports. A fresh home and a managed-service port of its own keep the
+     * running session out of both the picture and the port.
+     */
+    private void startOpencodeEntryHere() {
+        String home = "/data/data/com.termux/files/home/.opencode-page-live80";
+        String env = "env HOME=" + home + " XDG_CONFIG_HOME=" + home
+                + "/config XDG_DATA_HOME=" + home + "/data";
+        String command = "mkdir -p " + home + "; " + env
+                + " opencode service set port 53114 >/dev/null 2>&1; " + env + " opencode";
+        startTermuxSession(command, "opencode entry in sample view", true);
+    }
+
+    /**
+     * Replays the recorded bytes in Termux, after a pause that lets the keyboard
+     * be dismissed: a resize after the replay would move rows the bytes placed.
+     */
+    private void replayEntryPageInTermux() {
+        // Echo off before the bytes: the stream asks the terminal questions
+        // (DA, cursor position, OSC colours) and a live terminal answers; with
+        // echo on, the pty draws those answers as text over the page it is
+        // replaying, which is an artifact of the replay, not of the page.
+        String command = "sleep 5; stty -echo; stty size > " + TERMUX_FILES
+                + "/replay-grid.txt; cat " + TERMUX_FILES
+                + "/opencode-stream.bin; sleep 600";
+        startTermuxForeground(command, "replay opencode entry page");
+    }
+
+    /** The same recorded bytes, fed to {@link TerminalView} instead of Termux. */
+    private void replayEntryPageHere() {
+        File file = new File(getExternalFilesDir(null), "opencode-stream.bin");
+        if (!file.isFile()) {
+            writeEvidence("replay:missing:" + file);
+            status.setText("no recorded stream");
+            return;
+        }
+        String stream;
+        try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = in.read(buffer)) > 0) {
+                out.write(buffer, 0, count);
+            }
+            stream = out.toString(StandardCharsets.UTF_8.name());
+        } catch (IOException failed) {
+            writeEvidence("replay:failed:" + failed);
+            return;
+        }
+        status.setText("replaying " + stream.length() + " chars");
+        final String bytes = stream;
+        // After layout: the view fits its grid in onSizeChanged, and a feed
+        // before that would be copied into a smaller one.
+        ui.postDelayed(() -> {
+            terminal.feed(bytes);
+            writeEvidence("replay:drawn " + bytes.length() + " chars");
+        }, 1200);
+    }
+
+    private void startTermuxForeground(String command, String label) {
+        writeEvidence("termux:foreground:" + command);
+        status.setText("opening a Termux session");
+        try {
+            TermuxSession.startForeground(this, command, label);
+        } catch (RuntimeException refused) {
+            writeEvidence("termux:start-failed:" + refused);
+            status.setText("Termux refused: " + refused.getMessage());
+        }
     }
 
     /** Reads an asset as text; null when it is not in the APK. */

@@ -84,6 +84,8 @@ public final class TerminalView extends View {
     private final Screen screen = new Screen(80, 24);
     private final SpannableStringBuilder input = new SpannableStringBuilder();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    /** The bundled monospace face, or the system one when the host has no asset. */
+    private final Typeface typeface;
     private String[] lastRows = new String[screen.rows()];
     private float cellHeight = 1;
     private float cellWidth = 1;
@@ -136,11 +138,29 @@ public final class TerminalView extends View {
         setFocusable(true);
         setFocusableInTouchMode(true);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
-        paint.setTypeface(Typeface.MONOSPACE);
+        typeface = loadTypeface();
+        paint.setTypeface(typeface);
         paint.setTextSize(getResources().getDisplayMetrics().scaledDensity * 9f);
         cellWidth = Math.max(1f, paint.measureText("M"));
         paint.setColor(TEXT_COLOR);
         setBackgroundColor(Color.rgb(0x10, 0x14, 0x18));
+    }
+
+    /**
+     * The font the WebView page and this view share.
+     *
+     * <p>The page has always rendered with the bundled DejaVu Sans Mono, while
+     * this view asked for the system "monospace": block and box glyphs came from
+     * a fallback whose ink was not the cell width, so bars and borders drifted by
+     * a few pixels. Loading the same face gives every glyph the same advance as
+     * the cell; a host that does not ship the asset keeps the system fallback.
+     */
+    private Typeface loadTypeface() {
+        try {
+            return Typeface.createFromAsset(getContext().getAssets(), "terminal-mono.ttf");
+        } catch (RuntimeException missing) {
+            return Typeface.MONOSPACE;
+        }
     }
 
     public void setListener(Listener listener) {
@@ -232,8 +252,14 @@ public final class TerminalView extends View {
         // Fit MIN_COLUMNS across the view, shrinking the type rather than the
         // grid: a program's layout assumes its columns, and a reader wants the
         // rows it drew, not the ones that happen to be legible.
+        paint.setTypeface(typeface);
         float base = getResources().getDisplayMetrics().scaledDensity * 9f;
-        float forColumns = width / (float) MIN_COLUMNS / 0.6f;
+        // Fit MIN_COLUMNS using this face's own advance, not a nominal 0.6 em:
+        // DejaVu Sans Mono is 0.602 em wide, and the old constant would let an
+        // 80th column hang past the view.
+        paint.setTextSize(base);
+        float cellAtBase = Math.max(1f, paint.measureText("M"));
+        float forColumns = width / (MIN_COLUMNS * (cellAtBase / base));
         paint.setTextSize(Math.max(1f, Math.min(base, forColumns)));
         cellWidth = Math.max(1f, paint.measureText("M"));
         cellHeight = Math.max(1f, paint.getFontSpacing());

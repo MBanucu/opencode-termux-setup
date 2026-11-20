@@ -14,9 +14,10 @@ import android.util.Log;
  * under `script`, so it has a real pty - `[ -t 1 ]` holds, `stty size` works, and
  * a full-screen program renders - while this app talks to it through the socket.
  *
- * <p>Background runner on purpose: a `terminal-session` command raises the Termux
- * window and takes the user out of this app, while the whole point here is to
- * keep the inline terminal in front.
+ * <p>Background runner for the inline sample: a foreground session raises the
+ * Termux window and takes the user out of this app, while the whole point there
+ * is to keep the inline terminal in front. {@link #startForeground} is the other
+ * way round, for when the program is to be seen in Termux's own renderer.
  */
 final class TermuxSession {
 
@@ -59,6 +60,30 @@ final class TermuxSession {
         // explained there instead of failing silently.
         context.startService(intent);
         Log.i(TAG, "asked Termux for a session on port " + port);
+    }
+
+    /**
+     * Runs a command in a Termux session the GUI shows and switches to.
+     *
+     * <p>The opposite of the sessions above: they are background so the inline
+     * view stays in front, this one is foreground precisely so Termux's own
+     * emulator draws the program, with no socket and no wrapper in between.
+     *
+     * @param command the line {@code bash -lc} runs in the new session
+     */
+    static void startForeground(Context context, String command, String label) {
+        Intent intent = new Intent();
+        intent.setClassName(TERMUX_PACKAGE, SERVICE);
+        intent.setAction(ACTION);
+        intent.putExtra("com.termux.RUN_COMMAND_PATH", BASH);
+        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] { "-lc", command });
+        intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", HOME);
+        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", false);
+        // 0 asks Termux to switch to the new session, which is the point.
+        intent.putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", 0);
+        intent.putExtra("com.termux.RUN_COMMAND_COMMAND_LABEL", label);
+        context.startService(intent);
+        Log.i(TAG, "asked Termux for a foreground session: " + label);
     }
 
     /**

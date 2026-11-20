@@ -30,7 +30,7 @@ case "${1:-}" in
     --restore) RESTORE_ONLY=1 ;;
     --only) ONLY=${2:-} ;;
 esac
-CHECKS="pty cursor cursor-escapes colour tui tui-echo tui-caret tui-blink tui-bg resize rows session session-resize opencode"
+CHECKS="pty cursor cursor-escapes colour tui tui-echo tui-caret tui-blink tui-bg tui-symbols tui-modes resize rows session session-resize opencode"
 FAIL=0
 
 say() { printf '%s\n' "$*"; }
@@ -1045,6 +1045,85 @@ test_opencode_tui() {
         || bad "opencode: no announcements from a repainting TUI"
 }
 
+# --- the opencode entry page's glyphs and modes -------------------------------
+
+# The page was captured from its own pty at 100x30: six non-ASCII glyphs and
+# truecolor SGR only. `assets/tui-symbols.py` is the page in miniature. The rows
+# prove the parser carried every glyph; the screenshot proves a truecolor
+# background reached the cells, which the row text cannot show.
+test_entry_page_symbols() {
+    launch --ez symbols true
+    if ! await "symbols-tui:started" 30 || ! await "SYMBOLS" 25; then
+        bad "symbols: the entry-page TUI never drew"
+        return
+    fi
+    local tree
+    tree=$(dump e2e-symbols)
+    if printf '%s\n' "$tree" | grep -aqF 'SYMBOLS ▀ █ ▄ ┃ ╹ … ·'; then
+        ok "symbols: all seven entry-page glyphs reached the row nodes"
+    else
+        bad "symbols: a glyph is missing from the row nodes"
+    fi
+    if printf '%s\n' "$tree" | grep -aqF '█▀▀█ █▀▀█ █▀▀█'; then
+        ok "symbols: the block logo is in the tree"
+    else
+        bad "symbols: the block logo is missing"
+    fi
+    if printf '%s\n' "$tree" | grep -aqF 'Ask anything…'; then
+        ok "symbols: the composer's ellipsis reached the tree"
+    else
+        bad "symbols: the composer text is missing"
+    fi
+    if ! command -v ffmpeg >/dev/null; then
+        say "skip symbols pixels (no ffmpeg to read the screenshot)"
+        return
+    fi
+    settled_grid 8 >/dev/null || true
+    local shot=samples/out/symbols.png canvas panel
+    device exec-out screencap -p > "$shot" 2>/dev/null
+    canvas=$(color_pixels "$shot" 10 10 10 6)   # #0A0A0A, the page's canvas
+    panel=$(color_pixels "$shot" 30 30 30 6)    # #1E1E1E, the composer
+    if [ "${canvas:-0}" -gt 20000 ] && [ "${panel:-0}" -gt 10000 ]; then
+        ok "symbols: the page's truecolor fills reached the pixels ($canvas, $panel)"
+    else
+        bad "symbols: a truecolor fill is missing (canvas '${canvas:-none}', panel '${panel:-none}')"
+    fi
+    if type_until "q" "symbols tui left the alternate screen"; then
+        ok "symbols: 'q' left the alternate screen"
+    else
+        bad "symbols: 'q' did not leave the alternate screen"
+    fi
+}
+
+# The page also enables modes that draw nothing and asks the terminal questions.
+# `assets/tui-modes.py` sends the whole set and draws one sentinel: a payload
+# that leaked is text in the tree, and a mode that swallowed input never quits.
+test_entry_page_modes() {
+    launch --ez modes true
+    if ! await "modes-tui:started" 30 || ! await "MODES-OK" 25; then
+        bad "modes: the entry-page TUI never drew"
+        return
+    fi
+    local tree text
+    tree=$(dump e2e-modes)
+    text=$(printf '%s\n' "$tree" | sed -n 's/.* text=\(.*\) desc=.*/\1/p')
+    if printf '%s\n' "$text" | grep -aqF 'MODES-OK'; then
+        ok "modes: the sentinel row is in the tree"
+    else
+        bad "modes: the sentinel row is missing"
+    fi
+    if printf '%s\n' "$text" | grep -aqE '1049|2026|2004|2031|P\+q4d73|1337|\[\?u'; then
+        bad "modes: an escape payload leaked into the row text"
+    else
+        ok "modes: every mode and query was consumed, not printed"
+    fi
+    if type_until "q" "modes tui left the alternate screen"; then
+        ok "modes: 'q' left the alternate screen"
+    else
+        bad "modes: 'q' did not leave the alternate screen"
+    fi
+}
+
 # --- run ----------------------------------------------------------------------
 
 # One check by name, or all of them: the install and the device state are the
@@ -1090,6 +1169,8 @@ check tui-echo test_tui_echoes_the_line_above
 check tui-caret test_tui_caret_is_visible
 check tui-blink test_tui_blinks_the_caret
 check tui-bg test_tui_background_box
+check tui-symbols test_entry_page_symbols
+check tui-modes test_entry_page_modes
 check pty test_pty_is_a_terminal
 check resize test_grid_resize_reaches_the_pty
 check rows test_rows_and_events

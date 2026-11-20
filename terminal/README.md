@@ -17,6 +17,10 @@ comparison with xterm.js in a WebView, is
 | `TerminalView` | the view: grid, rendering, `AccessibilityNodeProvider`, `InputConnection`, announcements |
 | `Screen` | the grid: the ECMA-48 subset a TUI uses — alternate screen, cursor addressing, erases, insert/delete, scroll regions, SGR foreground and background. Package-private; not part of the API |
 
+`TerminalView` loads `terminal-mono.ttf` from the host app's assets when present —
+the same DejaVu Sans Mono the WebView page uses — and falls back to the system
+monospace when it is not. The sample build copies the font into a sample's assets.
+
 It is transport-agnostic: the caller feeds text and is told what to do.
 
 ```java
@@ -58,7 +62,8 @@ cursor addressing, erases, insert/delete, scroll regions, the alternate screen,
 wrapping, SGR foreground and background colour (16, 256 and truecolor, and `1`
 brightening a foreground), the
 caret (DEC mode 25, synchronized updates, DECSCUSR style and DEC mode 12 blinking),
-and the sequences that must print nothing (OSC titles, cursor visibility),
+and the sequences that must print nothing (OSC titles and DCS payloads, cursor
+visibility),
 including escapes split across two `feed` calls. It needs no device,
 no Gradle and no test framework, because the grid is plain Java. The view needs a
 device and is covered by `samples/e2e.sh`.
