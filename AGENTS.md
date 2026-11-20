@@ -145,6 +145,62 @@ was left out of that commit (`d559217`) and committed on its own once reviewed.
 Check `git status` before committing: a working tree that is dirty with someone
 else's change is the normal state of this repo, not permission to bundle.
 
+## The symbol in a screenshot is a guess; the accessibility tree is the answer
+
+Matching Termux's TAB key took two tries. A 720 px screenrecord frame of Termux's strip
+read as `⇤` (U+21E4) at 15 px, and that is what went into `key_tab_glyph`. A
+`uiautomator dump` of the same screen says the key's text is `↹` (U+21B9); the same dump
+also names the dash `―` (U+2015) and PASTE `⎘` (U+2398). Symbol fonts draw different
+codepoints with almost the same shape at that size. Copy a glyph from the tree, not the
+pixels: dump it, then print each `text=` with its codepoints (`[hex(ord(c)) for c in t]`).
+Termux only has the extra keys in the tree while the keyboard is up, so tap the terminal
+first.
+
+## Extra keys are a grid: count the eight cells before moving one
+
+The footer is two rows of eight equal cells. Every "X should sit over Y" request is
+settled by the top row's order, and there are only eight slots: with Left, Down and
+Right in cells 4, 5 and 6, Home and End have to be 4 and 6 above them, Page up and Page
+down 7, and the two symbols 1 and 8 - which leaves PASTE in cell 3, over ALT. That is
+where it went when Home/Left and End/Right were aligned. Before moving a key, write the
+eight columns out; the free cell is rarely the one that looks free.
+
+## A run that says "no devices" is not a failing test
+
+A test run reported `OpencodeTuiTest ... FAILED` after 37 s with `adb: no devices/
+emulators found` from the harness: the wireless transport had dropped. The port is per
+session - 44619, then 45249, then 38915 in one afternoon - so `python3 test/adb-connect.py`
+reconnects and the same APK passes. The harness log under `android/app/build/e2e-*.log`
+holds NUL bytes; read it with `tr -d '\000' < log | grep -a`, or the grep itself looks
+like it found nothing.
+
+## `ppwd` is the typing flake, not a rendering bug
+
+Two runs failed with `awaitScreen` saying "the TUI never drew a screen" while its own
+quoted screen showed the TUI drawn and `$ ppwd` answered `command not found`: the
+`input keyevent` batch had delivered a doubled `p`. Read the quoted last screen before
+believing the message; a drawn TUI with a mangled command means the typing sequence, and
+a rerun is the answer.
+
+## Ask which window is in front before believing a node is missing
+
+A keyboard-toggle check dumped the UI right after `OpencodeTuiTest` and found no
+`Keyboard` key. `dumpsys window | grep mCurrentFocus` showed
+`com.termux/.app.TermuxActivity` - the test had left Termux in front, so the dump was
+Termux's window. Print the focus line next to the dump, and drive the page again
+(`am force-stop`, then the flow) instead of trusting a "not found".
+
+## A keyboard key that remembers its state is a one-way switch
+
+`toggleKeyboard()` used to decide from `keyboardShown`, a flag derived from the window
+shrinking, and to hide with `hideSoftInputFromWindow` alone. On the opencode page the key
+now shows and hides on alternate taps - `dumpsys input_method` reports `mInputShown=true`
+then `false`, and `events.log` gets `keyboard:show` then `keyboard:hide`. Two things were
+needed: ask the window rather than the flag
+(`getRootWindowInsets().isVisible(WindowInsets.Type.ime())`, with the flag as the fallback
+below API 30), and blur xterm's textarea (`blurTerm()`) before hiding - the IME is
+anchored to that element, so a hide aimed at the window alone leaves the keyboard up.
+
 ## Environment facts this device has
 
 - adb connects over TCP at `127.0.0.1:<port>`, and the port changes between
@@ -159,6 +215,8 @@ else's change is the normal state of this repo, not permission to bundle.
   "connection refused". A refusal, not silence, is what "off" looks like.
 - Termux is `com.termux` with prefix `/data/data/com.termux/files/usr`; opencode
   is 2.3.2 and its TUI is the only thing in this repo that never exits.
+- `adb pull` cannot write to `/tmp` here (`Permission denied`); pull into the
+  project and delete the file afterwards.
 - The app's evidence, all under
   `/sdcard/Android/data/io.github.mbanucu.opencodesetup/files/`:
   `live-output.txt` (screen text as the page rendered it), `events.log`

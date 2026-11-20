@@ -10,6 +10,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.os.Handler;
@@ -20,6 +21,7 @@ import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
@@ -68,13 +70,18 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private static final Pattern COLS = Pattern.compile("\"cols\":(\\d+)");
     private static final Pattern ROWS = Pattern.compile("\"rows\":(\\d+)");
     private static final String TAG = "OpencodeSetup";
-    /** The bytes the footer's keys send: Escape, Tab and the four arrows. */
+    /** The bytes the footer's keys send, as the terminal they reach expects. */
     private static final byte[] ESC = { 0x1b };
     private static final byte[] TAB = { 0x09 };
+    private static final byte[] SLASH = { '/' };
     private static final byte[] ARROW_UP = { 0x1b, '[', 'A' };
     private static final byte[] ARROW_DOWN = { 0x1b, '[', 'B' };
     private static final byte[] ARROW_RIGHT = { 0x1b, '[', 'C' };
     private static final byte[] ARROW_LEFT = { 0x1b, '[', 'D' };
+    private static final byte[] HOME = { 0x1b, '[', 'H' };
+    private static final byte[] END = { 0x1b, '[', 'F' };
+    private static final byte[] PG_UP = { 0x1b, '[', '5', '~' };
+    private static final byte[] PG_DOWN = { 0x1b, '[', '6', '~' };
 
     protected LinearLayout column;
 
@@ -545,41 +552,62 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             column.addView(frame, params);
 
             if (fullScreen) {
-                // Footer: Termux's extra keys, which a phone keyboard cannot
-                // type. Escape, Tab and the arrows are how a TUI is navigated,
-                // Ctrl and Alt are what turn a key into a control code, and the
-                // keyboard key is how the rows it covers come back. There is no
-                // cancel: Back in the header already leaves, and it only ever
-                // left the command running in Termux, which this app cannot stop.
-                LinearLayout footer = new LinearLayout(this);
-                footer.setOrientation(LinearLayout.HORIZONTAL);
-                footer.setGravity(Gravity.CENTER_VERTICAL);
-                footer.setBackgroundColor(0xFF0D1116);
+                // Footer: the two rows this device's Termux is configured with,
+                // key for key, because a phone keyboard has neither Escape, Tab,
+                // the arrows nor the page keys a TUI and a shell are driven with.
+                // Eight columns in both rows, so the keys line up as a grid: the
+                // burger key is left out, and the copy symbol takes the dash's
+                // cell rather than a new column. There is no cancel: Back in the
+                // header already leaves, and it only ever left the command
+                // running in Termux, which this app cannot stop.
+                LinearLayout keys = new LinearLayout(this);
+                keys.setOrientation(LinearLayout.VERTICAL);
+                keys.setBackgroundColor(0xFF0D1116);
                 if (inputEnabled) {
-                    // The order Termux uses: the modifiers first, then the keys a
-                    // TUI needs, then the keyboard itself.
-                    footer.addView(terminalKey(R.string.key_esc, () -> type(ESC)), keyParams(1f));
+                    LinearLayout top = keyRow();
+                    top.addView(terminalKey(R.string.key_esc, () -> type(ESC)), keyParams(1f));
+                    top.addView(terminalKey(R.string.key_slash, () -> type(SLASH)), keyParams(1f));
+                    top.addView(terminalKey(R.string.key_paste, this::paste), keyParams(1f));
+                    // Each key sits over its partner: Home over Left, Up over Down,
+                    // End over Right and Page up over Page down, so both rows read
+                    // as one grid of columns.
+                    top.addView(terminalKey(R.string.key_home, () -> type(HOME)), keyParams(1f));
+                    top.addView(terminalKey(R.string.key_up, () -> type(ARROW_UP)), keyParams(1f));
+                    top.addView(terminalKey(R.string.key_end, () -> type(END)), keyParams(1f));
+                    top.addView(terminalKey(R.string.key_pgup, () -> type(PG_UP)), keyParams(1f));
+                    top.addView(copyKey(), keyParams(1f));
+
+                    LinearLayout bottom = keyRow();
+                    // Tab gets a symbol too: a terminal's extra keys draw it as
+                    // ↹, and the word was the widest label in the row.
+                    Button tab = terminalKey(R.string.key_tab_glyph, () -> type(TAB));
+                    tab.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+                    tab.setContentDescription(getString(R.string.key_tab));
+                    bottom.addView(tab, keyParams(1f));
                     ctrlButton = terminalKey(R.string.key_ctrl, () -> setCtrlArmed(!ctrlArmed));
-                    footer.addView(ctrlButton, keyParams(1f));
+                    bottom.addView(ctrlButton, keyParams(1f));
                     altButton = terminalKey(R.string.key_alt, () -> setAltArmed(!altArmed));
-                    footer.addView(altButton, keyParams(1f));
-                    footer.addView(terminalKey(R.string.key_tab, () -> type(TAB)), keyParams(1f));
-                    footer.addView(terminalKey(R.string.key_left, () -> type(ARROW_LEFT)), keyParams(1f));
-                    footer.addView(terminalKey(R.string.key_up, () -> type(ARROW_UP)), keyParams(1f));
-                    footer.addView(terminalKey(R.string.key_down, () -> type(ARROW_DOWN)), keyParams(1f));
-                    footer.addView(terminalKey(R.string.key_right, () -> type(ARROW_RIGHT)), keyParams(1f));
-                    // Copy is not a Termux key, but this page is where the
-                    // agent's output is read, so it keeps its place in the row.
-                    footer.addView(copyKey(), keyParams(1f));
+                    bottom.addView(altButton, keyParams(1f));
+                    bottom.addView(terminalKey(R.string.key_left, () -> type(ARROW_LEFT)), keyParams(1f));
+                    bottom.addView(terminalKey(R.string.key_down, () -> type(ARROW_DOWN)), keyParams(1f));
+                    bottom.addView(terminalKey(R.string.key_right, () -> type(ARROW_RIGHT)), keyParams(1f));
+                    bottom.addView(terminalKey(R.string.key_pgdn, () -> type(PG_DOWN)), keyParams(1f));
                     keyboardButton = terminalKey(R.string.key_keyboard_glyph,
                             this::toggleKeyboard);
                     keyboardButton.setContentDescription(getString(R.string.key_keyboard));
-                    footer.addView(keyboardButton, keyParams(1f));
+                    bottom.addView(keyboardButton, keyParams(1f));
+
+                    keys.addView(top, keyRowParams());
+                    keys.addView(bottom, keyRowParams());
                 } else {
-                    footer.addView(new View(this), keyParams(1f));
+                    // A page whose output is only read keeps the rows' height, so
+                    // the terminal does not shrink when a command starts.
+                    keys.addView(keyRow(), keyRowParams());
+                    keys.addView(keyRow(), keyRowParams());
                 }
-                column.addView(footer, new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+                column.addView(keys, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
             } else {
                 copyButton = new Button(this);
                 copyButton.setText(R.string.copy_output);
@@ -623,9 +651,39 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         view.setMinHeight(0);
         view.setMinimumHeight(0);
         view.setPadding(0, 0, 0, 0);
-        view.setBackground(null);
+        view.setBackground(keyShape(false));
         view.setGravity(Gravity.CENTER);
         return view;
+    }
+
+    /**
+     * The box a key sits in.
+     *
+     * <p>Termux's extra keys are buttons, not bare labels: a fill a shade above
+     * the strip and a hairline border, with a small gap between keys, so the
+     * rows read as a grid of keys instead of a line of words. An armed Ctrl or
+     * Alt takes the accent fill and keeps its border.
+     */
+    private GradientDrawable keyShape(boolean armed) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(armed ? 0xFF2F6FB2 : 0xFF1A2028);
+        shape.setCornerRadius(dp(3));
+        shape.setStroke(Math.max(1, dp(1)), armed ? 0xFF5A9BD8 : 0xFF2C343D);
+        return shape;
+    }
+
+    /** One row of the footer's extra keys, at Termux's strip height. */
+    private LinearLayout keyRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        return row;
+    }
+
+    /** The height of one such row; two of them stack above the keyboard. */
+    private LinearLayout.LayoutParams keyRowParams() {
+        return new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
     }
 
     /** One footer key: no box, monospace, as wide as its share of the row. */
@@ -636,21 +694,59 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         return view;
     }
 
-    /** The copy key, smaller than the terminal keys so they keep the room. */
+    /**
+     * Pastes the clipboard into the running command, the way Termux's PASTE key
+     * does.
+     *
+     * <p>A terminal's Enter is a carriage return, so a line feed in the
+     * clipboard is sent as one; left as a line feed it would be a control
+     * character the program prints instead of a new line. Ctrl and Alt do not
+     * apply to a paste.
+     */
+    private void paste() {
+        if (!inputEnabled) {
+            return;
+        }
+        ClipboardManager clipboard =
+                (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = clipboard == null ? null : clipboard.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) {
+            return;
+        }
+        CharSequence text = clip.getItemAt(0).coerceToText(this);
+        if (text == null || text.length() == 0) {
+            return;
+        }
+        byte[] bytes = text.toString().replace("\r\n", "\n").replace('\n', '\r')
+                .getBytes(StandardCharsets.UTF_8);
+        // Only the size: a clipboard may hold anything.
+        Diagnostics.log(this, "paste:" + bytes.length);
+        liveStream.send(bytes);
+    }
+
+    /**
+     * The copy key: a symbol rather than a word, so it takes one cell of the
+     * strip like the terminal keys do, and dimmer than them because copying is
+     * not what the page is for.
+     */
     private Button copyKey() {
-        Button view = key(R.string.copy_short);
-        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        Button view = key(R.string.copy_glyph);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         view.setTextColor(0xFF7C8792);
+        view.setContentDescription(getString(R.string.copy_short));
         view.setOnClickListener(v -> copy(screen));
         return view;
     }
 
-    /** A footer child: a share of the row, at the strip's full height. */
+    /** A footer child: an equal share of the row, with the gap between keys. */
     private LinearLayout.LayoutParams keyParams(float weight) {
-        return new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 weight > 0f ? 0 : LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 weight);
+        int gap = dp(2);
+        params.setMargins(gap, gap, gap, gap);
+        return params;
     }
 
     /**
@@ -675,9 +771,7 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         if (key == null) {
             return;
         }
-        GradientDrawable held = new GradientDrawable();
-        held.setColor(0xFF2F6FB2);
-        key.setBackground(armed ? held : null);
+        key.setBackground(keyShape(armed));
         key.setTextColor(armed ? 0xFFFFFFFF : 0xFFDCDCDC);
     }
 
@@ -695,8 +789,15 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         if (box == null || ime == null) {
             return;
         }
-        if (keyboardShown) {
+        if (keyboardOpen(box)) {
+            // xterm types into a textarea of its own and the IME is anchored to
+            // it: hiding the window alone leaves the keyboard up, because the
+            // focused element is still there asking for it. Blur it first.
+            script("blurTerm()");
+            box.clearFocus();
             ime.hideSoftInputFromWindow(box.getWindowToken(), 0);
+            keyboardShown = false;
+            Diagnostics.log(this, "keyboard:hide");
             return;
         }
         box.requestFocus();
@@ -704,6 +805,22 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         // view alone leaves the keyboard with no element to type into.
         script("focusTerm()");
         ime.showSoftInput(box, InputMethodManager.SHOW_IMPLICIT);
+        Diagnostics.log(this, "keyboard:show");
+    }
+
+    /**
+     * Whether the keyboard covers part of this page right now.
+     *
+     * <p>Asked of the window rather than remembered: the keyboard can be closed
+     * by the system's back arrow or by the page itself, and a flag that missed
+     * either would turn the key into a one-way switch.
+     */
+    private boolean keyboardOpen(WebView box) {
+        WindowInsets insets = box.getRootWindowInsets();
+        if (insets != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return insets.isVisible(WindowInsets.Type.ime());
+        }
+        return keyboardShown;
     }
 
     /**

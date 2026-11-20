@@ -199,6 +199,8 @@
 
   /** Puts the cursor in the emulator's textarea, so typed keys have a target. */
   window.focusTerm = function () { if (inputOn) term.focus(); };
+  /** Takes the cursor out again, so the keyboard can be dismissed for good. */
+  window.blurTerm = function () { if (term.textarea) term.textarea.blur(); };
 
   /** Stops refitting: the running command owns this grid until it exits. */
   window.lockFit = function () { frozen = true; alignFrozenGrid(); reportResize(); };
