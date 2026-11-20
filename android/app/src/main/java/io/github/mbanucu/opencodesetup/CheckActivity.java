@@ -28,6 +28,6 @@ public final class CheckActivity extends PageActivity {
         button(R.string.check_opencode_action, v -> TerminalActivity.start(this,
                 Commands.OPENCODE, "opencode",
                 "Start the opencode coding agent",
-                getString(R.string.check_opencode_title), 8));
+                getString(R.string.check_opencode_title), 8, true));
     }
 }

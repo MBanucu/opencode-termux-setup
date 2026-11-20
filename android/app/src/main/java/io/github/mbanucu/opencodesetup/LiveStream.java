@@ -28,6 +28,9 @@ final class LiveStream {
 
     private ServerSocket socket;
 
+    /** The one connection Termux made; input goes back out on it. */
+    private volatile Socket connection;
+
     /**
      * Opens a port on the loopback address and streams what arrives to
      * {@code sink}, one chunk per read. Returns the port, or {@code 0} when no
@@ -51,10 +54,41 @@ final class LiveStream {
         }
     }
 
+    /**
+     * Sends bytes to the command's stdin over the connection it opened to read
+     * this page's output: a terminal page with a keyboard writes its keystrokes
+     * here, and Termux runs the pseudo terminal with that socket as stdin.
+     */
+    void send(byte[] bytes) {
+        Socket live = connection;
+        if (live == null || bytes == null || bytes.length == 0) {
+            return;
+        }
+        try {
+            synchronized (this) {
+                live.getOutputStream().write(bytes);
+                live.getOutputStream().flush();
+            }
+        } catch (IOException gone) {
+            // The command exited between the key and the write; the result
+            // still comes back through the receiver.
+            Log.w(TAG, "could not write to the command's input", gone);
+        }
+    }
+
     /** Closes the port; a pump blocked in {@code accept} or {@code read} ends. */
     void close() {
         ServerSocket open = socket;
         socket = null;
+        Socket live = connection;
+        connection = null;
+        if (live != null) {
+            try {
+                live.close();
+            } catch (IOException ignored) {
+                // Already closed.
+            }
+        }
         if (open == null) {
             return;
         }
@@ -65,9 +99,10 @@ final class LiveStream {
         }
     }
 
-    private static void pump(ServerSocket server, Consumer<String> sink) {
-        try (Socket connection = server.accept()) {
-            Reader reader = new InputStreamReader(connection.getInputStream(),
+    private void pump(ServerSocket server, Consumer<String> sink) {
+        try (Socket accepted = server.accept()) {
+            connection = accepted;
+            Reader reader = new InputStreamReader(accepted.getInputStream(),
                     StandardCharsets.UTF_8);
             char[] buffer = new char[4096];
             int read;
@@ -76,6 +111,8 @@ final class LiveStream {
             }
         } catch (IOException done) {
             // The command exited or the page went away; the result follows.
+        } finally {
+            connection = null;
         }
     }
 }

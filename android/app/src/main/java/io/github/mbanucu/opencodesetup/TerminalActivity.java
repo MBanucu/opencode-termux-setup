@@ -40,12 +40,24 @@ public final class TerminalActivity extends PageActivity {
      */
     static void start(Context from, String command, String label, String description,
             CharSequence title, int fontPx) {
+        start(from, command, label, description, title, fontPx, false);
+    }
+
+    /**
+     * The same, with this page's keyboard wired into the command's stdin.
+     *
+     * <p>Only an agent's TUI has anything to type into: a check's output is two
+     * lines, and a package manager must not be interrupted by a stray key.
+     */
+    static void start(Context from, String command, String label, String description,
+            CharSequence title, int fontPx, boolean input) {
         Intent page = new Intent(from, TerminalActivity.class);
         page.putExtra(EXTRA_COMMAND, command);
         page.putExtra(EXTRA_LABEL, label);
         page.putExtra(EXTRA_DESCRIPTION, description);
         page.putExtra(EXTRA_TITLE, title);
         page.putExtra("terminal_font", fontPx);
+        page.putExtra("terminal_input", input);
         from.startActivity(page);
     }
 

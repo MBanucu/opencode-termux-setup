@@ -86,6 +86,8 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     // program that redraws a line with a carriage return fits instead of wrapping.
     private volatile int columns;
     private volatile int rows;
+    /** Whether this page's keyboard is wired into the command's stdin. */
+    private boolean inputEnabled;
     private volatile boolean streamed;
     /** True while a command runs: accessibility updates wait until it ends. */
     private boolean commandRunning;
@@ -404,6 +406,13 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             WebView web = new WebView(this);
             web.setId(R.id.output);
             web.setBackgroundColor(0xFF101418);
+            // A page that takes typing is the exception: the keyboard is how its
+            // bytes reach the PTY. Everything else stays unfocusable, so a tap
+            // cannot raise a keyboard the command would have no use for.
+            inputEnabled = getIntent() != null
+                    && getIntent().getBooleanExtra("terminal_input", false);
+            web.setFocusable(inputEnabled);
+            web.setFocusableInTouchMode(inputEnabled);
 
             WebSettings settings = web.getSettings();
             settings.setJavaScriptEnabled(true);
@@ -529,8 +538,11 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             // measures its first grid. The PTY is sent that grid, and a font set
             // after the command starts would leave it drawing to the old width.
             int font = getIntent() == null ? 0 : getIntent().getIntExtra("terminal_font", 0);
-            web.loadUrl("file:///android_asset/terminal.html"
-                    + (font > 0 ? "?font=" + font : ""));
+            String query = font > 0 ? "?font=" + font : "";
+            if (inputEnabled) {
+                query += (query.isEmpty() ? "?" : "&") + "input=1";
+            }
+            web.loadUrl("file:///android_asset/terminal.html" + query);
         }
         return output;
     }
@@ -685,7 +697,8 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             write(chunk);
         });
         try {
-            TermuxCommands.send(this, command, label, description, port, columns, rows);
+            TermuxCommands.send(this, command, label, description, port, columns, rows,
+                    inputEnabled);
             // The PTY has this grid now; a window resize (the keyboard opening,
             // for one) must not reflow it underneath the running program.
             script("lockFit()");
@@ -900,6 +913,15 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 ui.post(ready);
             }
             Diagnostics.log(PageActivity.this, "tail:" + json);
+        }
+
+        /** A keystroke from the page's keyboard, on its way to the PTY. */
+        @JavascriptInterface
+        public void onInput(String base64) {
+            byte[] bytes = Base64.decode(base64, Base64.NO_WRAP);
+            // Only the size: what a user types into an agent can be private.
+            Diagnostics.log(PageActivity.this, "input:" + bytes.length);
+            liveStream.send(bytes);
         }
 
         @JavascriptInterface

@@ -43,6 +43,15 @@ final class TermuxCommands {
      */
     static void send(Context context, String command, String label, String description,
             int port, int columns, int rows) {
+        send(context, command, label, description, port, columns, rows, false);
+    }
+
+    /**
+     * The same, with the command's stdin on the app's loopback socket as well,
+     * so a page with a keyboard can type into the PTY it is watching.
+     */
+    static void send(Context context, String command, String label, String description,
+            int port, int columns, int rows, boolean input) {
         PendingIntent result = PendingIntent.getBroadcast(context, 0,
                 new Intent(RunCommandReceiver.ACTION_RESULT).setPackage(context.getPackageName()),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
@@ -52,7 +61,7 @@ final class TermuxCommands {
         intent.setAction(ACTION);
         intent.putExtra("com.termux.RUN_COMMAND_PATH", BASH);
         intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS",
-                new String[] {"-lc", wrap(command, port, columns, rows)});
+                new String[] {"-lc", wrap(command, port, columns, rows, input)});
         intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", HOME);
         intent.putExtra("com.termux.RUN_COMMAND_RUNNER", "app-shell");
         intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
@@ -80,7 +89,8 @@ final class TermuxCommands {
      * a carriage return wraps on a phone-width terminal, so each redraw lands on
      * a row of its own and the fragment above it is left behind.
      */
-    private static String wrap(String command, int port, int columns, int rows) {
+    private static String wrap(String command, int port, int columns, int rows,
+            boolean input) {
         String quoted = "'" + command.replace("'", "'\\''") + "'";
         String sized = columns > 0 && rows > 0
                 ? "stty cols " + columns + " rows " + rows + " 2>/dev/null; " : "";
@@ -92,9 +102,16 @@ final class TermuxCommands {
             return run;
         }
         // fd 3 is the app's listener; when that cannot be opened the command
-        // still runs and Termux still gets the output.
-        return "exec 3<>/dev/tcp/127.0.0.1/" + port + " 2>/dev/null || exec 3>/dev/null; "
-                + "{ " + run + " ; } 2>&1 | stdbuf -oL tee >(cat >&3); "
+        // still runs and Termux still gets the output. A page with a keyboard
+        // reads its bytes back off the same socket, so the pseudo terminal's
+        // stdin is fd 3 too: typing goes out on the connection the output came
+        // in on, and the fallback is read-write so neither side errors.
+        String open = input
+                ? "exec 3<>/dev/tcp/127.0.0.1/" + port + " 2>/dev/null || exec 3<>/dev/null; "
+                : "exec 3<>/dev/tcp/127.0.0.1/" + port + " 2>/dev/null || exec 3>/dev/null; ";
+        String feed = input ? " <&3" : "";
+        return open
+                + "{ " + run + " ; }" + feed + " 2>&1 | stdbuf -oL tee >(cat >&3); "
                 + "exit ${PIPESTATUS[0]}";
     }
 }

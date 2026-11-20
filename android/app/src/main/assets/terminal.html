@@ -23,6 +23,9 @@
   // cells that fit, and a font set afterwards would leave the program drawing to
   // a width the terminal no longer has.
   var fontPx = parseInt((window.location.search.match(/[?&]font=(\d+)/) || [])[1], 10);
+  // A page the intent wired a keyboard to: its keystrokes are sent back to the
+  // PTY, which Termux runs with this page's socket as stdin.
+  var inputOn = /[?&]input=1/.test(window.location.search);
 
   // The same dark scheme the app used before, so output looks the same.
   var term = new Terminal({
@@ -41,14 +44,24 @@
     // The bundle Termux returns uses "\n" where the PTY used "\r\n"; a real
     // terminal keeps the column on a line feed, which indented "exit code 0".
     convertEol: true,
-    // Display only: nothing is typed here, the command runs in Termux.
-    disableStdin: true,
+    // Typing exists only where the page asked for it; a check's output has
+    // nothing to type into.
+    disableStdin: !inputOn,
     scrollback: 3000
   });
 
   var fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(document.getElementById('screen'));
+
+  // Without typing, focusing xterm's textarea raises a keyboard the command has
+  // no use for, and the grid - which the PTY already has - would be refitted.
+  // With typing, this textarea is the keyboard's landing place.
+  if (term.textarea && !inputOn) {
+    term.textarea.setAttribute('inputmode', 'none');
+    term.textarea.setAttribute('readonly', 'readonly');
+    term.textarea.style.pointerEvents = 'none';
+  }
 
   /**
    * True once a command owns the grid.
@@ -98,6 +111,19 @@
   }
   fitNow();
   window.addEventListener('resize', fitNow);
+
+  // Each keystroke goes back over the connection the output arrives on: the app
+  // writes it to the socket Termux gave the pseudo terminal as stdin.
+  if (inputOn) {
+    term.onData(function (data) {
+      if (!window.AndroidBridge) {
+        return;
+      }
+      var utf8 = new TextEncoder().encode(data), binary = '', i;
+      for (i = 0; i < utf8.length; i++) binary += String.fromCharCode(utf8[i]);
+      window.AndroidBridge.onInput(window.btoa(binary));
+    });
+  }
 
   var waiting = false;
 
