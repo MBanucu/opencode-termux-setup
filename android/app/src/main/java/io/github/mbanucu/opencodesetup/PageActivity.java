@@ -67,9 +67,6 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     /** The emulator's size as published in the tail report. */
     private static final Pattern COLS = Pattern.compile("\"cols\":(\\d+)");
     private static final Pattern ROWS = Pattern.compile("\"rows\":(\\d+)");
-    /** The terminal's own size, which a frozen grid reports instead of its element's. */
-    private static final Pattern WIDTH = Pattern.compile("\"width\":(\\d+)");
-    private static final Pattern HEIGHT = Pattern.compile("\"height\":(\\d+)");
     private static final String TAG = "OpencodeSetup";
 
     protected LinearLayout column;
@@ -117,8 +114,6 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     /** The size the running command's PTY has, which is what it draws to. */
     private volatile int ptyColumns;
     private volatile int ptyRows;
-    /** The window the frozen grid was last re-fitted for. */
-    private volatile String lastWindow;
     private volatile String screen = "";
     private final Handler ui = new Handler(Looper.getMainLooper());
     private Runnable pending;
@@ -852,15 +847,13 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
             // The PTY was given this grid; anything else is a resize to follow.
             ptyColumns = columns;
             ptyRows = rows;
-            lastWindow = null;
-            // The PTY has this grid now; a window resize (the keyboard opening,
-            // for one) must not reflow it underneath the running program.
+            // The PTY has this grid now: the page keeps it, re-fits it when the
+            // window moves (the keyboard opening, for one) and reports the
+            // result, which is the size sent to the PTY below.
             script("lockFit()");
             Diagnostics.log(this, "sent " + label + " port="
                     + (port == 0 ? "none" : port)
                     + " pty=" + columns + "x" + rows);
-            // The PTY has the grid now; the page must not hand out another one.
-            script("freezeFit()");
             clearNotice();
             if (port > 0) {
                 startOutput();
@@ -1076,11 +1069,11 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
          * The grid and the window around it, sent the moment either moves.
          *
          * <p>These numbers are what the next command is sized to, so they are
-         * recorded even while a command runs. {@code frozen} in the report says
-         * the grid is still the one the running command was given; a window that
-         * moved under it is what makes the terminal re-fit, and the pseudo
-         * terminal is then told the new size, so the program redraws to fit
-         * instead of drawing into rows nobody can see.
+         * recorded even while a command runs. The page re-fits a frozen grid
+         * before reporting it, so {@code frozen} only says the size belongs to a
+         * running command: a grid the pseudo terminal does not have is the
+         * window having moved, and the PTY is told the same numbers so the
+         * program redraws to fit instead of drawing into rows nobody can see.
          */
         @JavascriptInterface
         public void onResize(String json) {
@@ -1102,31 +1095,15 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
                 }
             }
             Diagnostics.log(PageActivity.this, "resize:" + json);
+            // One rule: a grid the running command's PTY does not have is the
+            // window having moved, and the page has already re-fitted its grid
+            // to match before reporting it.
             if (reportedColumns < 0 || !json.contains("\"frozen\":true")) {
-                return;
-            }
-            String window = windowOf(json);
-            if (!window.equals(lastWindow)) {
-                // The window moved and the grid, being the running command's, did
-                // not: fit it to the cells that are visible now, and the report
-                // that follows carries the size the PTY has to take.
-                lastWindow = window;
-                if (commandRunning) {
-                    ui.post(() -> script("resizePty()"));
-                }
                 return;
             }
             if (commandRunning && (reportedColumns != ptyColumns || reportedRows != ptyRows)) {
                 resizePty(reportedColumns, reportedRows);
             }
-        }
-
-        /** The element's size from a resize report, for spotting a moved window. */
-        private String windowOf(String json) {
-            java.util.regex.Matcher width = WIDTH.matcher(json);
-            java.util.regex.Matcher height = HEIGHT.matcher(json);
-            return width.find() && height.find()
-                    ? width.group(1) + "x" + height.group(1) : json;
         }
 
         /**

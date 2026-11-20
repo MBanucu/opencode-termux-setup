@@ -66,10 +66,12 @@
   /**
    * True once a command owns the grid.
    *
-   * <p>The PTY was told this size and Termux cannot resize it mid-command, so
-   * refitting would reflow the screen under a program still drawing to the old
-   * grid - the keyboard opening is enough. And the row that goes first is the
-   * last one: a TUI's status line, where opencode prints its version.
+   * <p>The PTY was told this size, so the page must not quietly fit itself to a
+   * smaller window: that would reflow the screen under a program still drawing
+   * to the old grid. A frozen grid is re-fitted only together with a report,
+   * which is how the PTY is told to take the same size. And the row that goes
+   * first is the last one: a TUI's status line, where opencode prints its
+   * version.
    */
   var frozen = false;
 
@@ -98,21 +100,44 @@
     }
   }
 
-  function fitNow() {
-    if (frozen) {
-      return;
-    }
+  /** Fits the grid to the area it is drawn in, newest row included. */
+  function fitGrid() {
     try {
       fit.fit();
       // Fitting changes the row count, which can leave the newest line below
       // the last visible row.
       term.scrollToBottom();
-      keepTailVisible();
-      reportResize();
+      // A frozen grid is trimmed only as part of a re-fit: the report that
+      // follows hands the row it lost to the PTY as well.
+      keepTailVisible(frozen);
     } catch (e) { /* hidden or not laid out yet */ }
+    alignFrozenGrid();
+  }
+
+  function fitNow() {
+    if (frozen) {
+      return;
+    }
+    fitGrid();
+    reportResize();
   }
   fitNow();
-  window.addEventListener('resize', function () { fitNow(); alignFrozenGrid(); reportResize(); });
+
+  /**
+   * The window, or the area it gives the page, moved.
+   *
+   * <p>Nothing tells the page the keyboard opened: it only sees the size change,
+   * and the keyboard is one of the things that causes it. So every move is
+   * treated the same way - the grid is fitted to what is visible now and
+   * reported - and a frozen grid is re-fitted in this same step rather than
+   * asking the app to ask for it again a round trip later. The report is what
+   * the app hands to the PTY, so the program learns the new size and redraws.
+   */
+  function windowMoved() {
+    fitGrid();
+    reportResize();
+  }
+  window.addEventListener('resize', windowMoved);
 
   // Each keystroke goes back over the connection the output arrives on: the app
   // writes it to the socket Termux gave the pseudo terminal as stdin.
@@ -164,9 +189,8 @@
   /** Puts the cursor in the emulator's textarea, so typed keys have a target. */
   window.focusTerm = function () { if (inputOn) term.focus(); };
 
-  /** Stops refitting: the PTY has this grid until another page takes over. */
+  /** Stops refitting: the running command owns this grid until it exits. */
   window.lockFit = function () { frozen = true; alignFrozenGrid(); reportResize(); };
-  window.freezeFit = function () { frozen = true; alignFrozenGrid(); reportResize(); };
 
   /** Lets a reused page measure itself again for a new intent. */
   window.thawFit = function () { frozen = false; fitNow(); reportResize(); };
@@ -182,10 +206,9 @@
    * which is published four times a second at best and not at all while the
    * screen is still. A resize is an event, not a state to poll: the keyboard
    * opening, a rotation and the window regaining height all change what the next
-   * command should be sized to, and while a command runs the app decides from
-   * {@code frozen} whether these numbers are the grid the PTY has or only the
-   * window around it; the app re-fits a frozen grid and hands the result to the
-   * PTY, which a program on the other side sees as a resize.
+   * command should be sized to, and {@code frozen} says these numbers are the
+   * grid a running command owns; the app hands any change to the PTY, which a
+   * program on the other side sees as a resize.
    */
   function reportResize() {
     if (!window.AndroidBridge) {
@@ -226,33 +249,11 @@
     box.style.transform = hidden > 1 ? 'translateY(-' + Math.round(hidden) + 'px)' : '';
   }
 
-  /**
-   * Fits the grid the running command was given to the window as it is now.
-   *
-   * <p>Called when the window moved under a frozen grid. The emulator takes the
-   * cells that are visible now, and the app sends the same numbers to the PTY, so
-   * a full screen program is told the screen changed and redraws to fit, instead
-   * of drawing into rows that are off the bottom. The grid stays frozen: it is
-   * still the one the command owns.
-   */
-  window.resizePty = function () {
-    try {
-      fit.fit();
-      term.scrollToBottom();
-      keepTailVisible(true);
-    } catch (e) { /* hidden or not laid out yet */ }
-    alignFrozenGrid();
-    reportResize();
-  };
-
-  // The window's own resize event is not enough: a frozen grid ignores it, and
-  // the element can be given a new size - the keyboard shortening the page -
-  // without the browser's window changing at all.
+  // The window's own resize event is not enough: the element can be given a new
+  // size - the keyboard shortening the page - without the browser's window
+  // changing at all.
   if (window.ResizeObserver) {
-    new ResizeObserver(function () {
-      alignFrozenGrid();
-      reportResize();
-    }).observe(document.getElementById('screen'));
+    new ResizeObserver(windowMoved).observe(document.getElementById('screen'));
   }
   reportResize();
 
