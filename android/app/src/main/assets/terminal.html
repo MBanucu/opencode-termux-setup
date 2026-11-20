@@ -10,6 +10,11 @@
      every pixel it is given. */
   #screen { width: 100%; height: 100%; padding: 0; box-sizing: border-box; }
   .xterm .xterm-viewport { background: #101418 !important; }
+  /* The viewport's own scrollbar would take a column's width from the grid -
+     measured at twenty pixels on this phone - and paint a strip down the right
+     edge of an otherwise full-width screen. Hidden, the grid uses the whole
+     window and a touch drag still scrolls through the scrollback. */
+  .xterm .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
 </style>
 </head>
 <body>
@@ -53,6 +58,12 @@
   var fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(document.getElementById('screen'));
+  // Fit subtracts the scrollbar width it measured when the viewport was made,
+  // and falls back to fifteen when that measures zero. The bar is hidden above,
+  // so tell it there is none and the last columns reach the edge of the page.
+  if (term._core && term._core.viewport) {
+    term._core.viewport.scrollBarWidth = 0;
+  }
 
   // Without typing, focusing xterm's textarea raises a keyboard the command has
   // no use for, and the grid - which the PTY already has - would be refitted.

@@ -68,6 +68,13 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private static final Pattern COLS = Pattern.compile("\"cols\":(\\d+)");
     private static final Pattern ROWS = Pattern.compile("\"rows\":(\\d+)");
     private static final String TAG = "OpencodeSetup";
+    /** The bytes the footer's keys send: Escape, Tab and the four arrows. */
+    private static final byte[] ESC = { 0x1b };
+    private static final byte[] TAB = { 0x09 };
+    private static final byte[] ARROW_UP = { 0x1b, '[', 'A' };
+    private static final byte[] ARROW_DOWN = { 0x1b, '[', 'B' };
+    private static final byte[] ARROW_RIGHT = { 0x1b, '[', 'C' };
+    private static final byte[] ARROW_LEFT = { 0x1b, '[', 'D' };
 
     protected LinearLayout column;
 
@@ -83,6 +90,10 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     private Button keyboardButton;
     /** Ctrl, waiting for the one key it applies to. */
     private volatile boolean ctrlArmed;
+    /** Alt, waiting for the one key it applies to. */
+    private volatile boolean altArmed;
+    /** The Alt key, so arming it can show that it waits. */
+    private Button altButton;
     /** Whether the soft keyboard is covering part of the page. */
     private boolean keyboardShown;
     /** The tallest this window has been, which is its height without a keyboard. */
@@ -533,55 +544,48 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
 
             column.addView(frame, params);
 
-            copyButton = new Button(this);
-            copyButton.setText(R.string.copy_output);
-            copyButton.setAllCaps(false);
-            copyButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            copyButton.setOnClickListener(v -> copy(screen));
-
             if (fullScreen) {
-                // Footer: the keys a terminal on a phone needs, and a copy small
-                // enough not to compete with them. There is no cancel: Back in
-                // the header already leaves, and it only ever left the command
-                // running in Termux, which this app cannot stop.
+                // Footer: Termux's extra keys, which a phone keyboard cannot
+                // type. Escape, Tab and the arrows are how a TUI is navigated,
+                // Ctrl and Alt are what turn a key into a control code, and the
+                // keyboard key is how the rows it covers come back. There is no
+                // cancel: Back in the header already leaves, and it only ever
+                // left the command running in Termux, which this app cannot stop.
                 LinearLayout footer = new LinearLayout(this);
                 footer.setOrientation(LinearLayout.HORIZONTAL);
                 footer.setGravity(Gravity.CENTER_VERTICAL);
                 footer.setBackgroundColor(0xFF0D1116);
                 if (inputEnabled) {
-                    // Ctrl first, as in Termux: a TUI cannot be used without it,
-                    // because ^C interrupts a program and ^D ends one.
-                    ctrlButton = key(R.string.key_ctrl);
-                    ctrlButton.setOnClickListener(v -> setCtrlArmed(!ctrlArmed));
+                    // The order Termux uses: the modifiers first, then the keys a
+                    // TUI needs, then the keyboard itself.
+                    footer.addView(terminalKey(R.string.key_esc, () -> type(ESC)), keyParams(1f));
+                    ctrlButton = terminalKey(R.string.key_ctrl, () -> setCtrlArmed(!ctrlArmed));
                     footer.addView(ctrlButton, keyParams(1f));
-                    keyboardButton = key(R.string.key_keyboard);
-                    keyboardButton.setOnClickListener(v -> toggleKeyboard());
+                    altButton = terminalKey(R.string.key_alt, () -> setAltArmed(!altArmed));
+                    footer.addView(altButton, keyParams(1f));
+                    footer.addView(terminalKey(R.string.key_tab, () -> type(TAB)), keyParams(1f));
+                    footer.addView(terminalKey(R.string.key_left, () -> type(ARROW_LEFT)), keyParams(1f));
+                    footer.addView(terminalKey(R.string.key_up, () -> type(ARROW_UP)), keyParams(1f));
+                    footer.addView(terminalKey(R.string.key_down, () -> type(ARROW_DOWN)), keyParams(1f));
+                    footer.addView(terminalKey(R.string.key_right, () -> type(ARROW_RIGHT)), keyParams(1f));
+                    // Copy is not a Termux key, but this page is where the
+                    // agent's output is read, so it keeps its place in the row.
+                    footer.addView(copyKey(), keyParams(1f));
+                    keyboardButton = terminalKey(R.string.key_keyboard_glyph,
+                            this::toggleKeyboard);
+                    keyboardButton.setContentDescription(getString(R.string.key_keyboard));
                     footer.addView(keyboardButton, keyParams(1f));
                 } else {
                     footer.addView(new View(this), keyParams(1f));
                 }
-                // The smallest thing on the row: copying is not what the page is
-                // for, and Termux has no key for it either.
-                copyButton.setEnabled(false);
-                copyButton.setText(R.string.copy_short);
-                copyButton.setAllCaps(false);
-                copyButton.setTypeface(Typeface.MONOSPACE);
-                copyButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                copyButton.setTextColor(0xFF7C8792);
-                copyButton.setMinWidth(0);
-                copyButton.setMinimumWidth(0);
-                copyButton.setMinHeight(0);
-                copyButton.setMinimumHeight(0);
-                copyButton.setPadding(dp(14), 0, dp(14), 0);
-                copyButton.setBackground(null);
-                copyButton.setGravity(Gravity.CENTER);
-                LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.MATCH_PARENT);
-                footer.addView(copyButton, copyParams);
                 column.addView(footer, new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
             } else {
+                copyButton = new Button(this);
+                copyButton.setText(R.string.copy_output);
+                copyButton.setAllCaps(false);
+                copyButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                copyButton.setOnClickListener(v -> copy(screen));
                 // Only meaningful once there is output; hidden until then, so it
                 // does not sit on a page that has run nothing.
                 copyButton.setVisibility(View.GONE);
@@ -624,6 +628,23 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
         return view;
     }
 
+    /** One footer key: no box, monospace, as wide as its share of the row. */
+    private Button terminalKey(int label, Runnable action) {
+        Button view = key(label);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        view.setOnClickListener(v -> action.run());
+        return view;
+    }
+
+    /** The copy key, smaller than the terminal keys so they keep the room. */
+    private Button copyKey() {
+        Button view = key(R.string.copy_short);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        view.setTextColor(0xFF7C8792);
+        view.setOnClickListener(v -> copy(screen));
+        return view;
+    }
+
     /** A footer child: a share of the row, at the strip's full height. */
     private LinearLayout.LayoutParams keyParams(float weight) {
         return new LinearLayout.LayoutParams(
@@ -640,13 +661,24 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
      */
     private void setCtrlArmed(boolean armed) {
         ctrlArmed = armed;
-        if (ctrlButton == null) {
+        showArmed(ctrlButton, armed);
+    }
+
+    /** Arms Alt for exactly one key, and shows that it is waiting. */
+    private void setAltArmed(boolean armed) {
+        altArmed = armed;
+        showArmed(altButton, armed);
+    }
+
+    /** Fills a waiting modifier, the way Termux fills its Ctrl key while held. */
+    private void showArmed(Button key, boolean armed) {
+        if (key == null) {
             return;
         }
         GradientDrawable held = new GradientDrawable();
         held.setColor(0xFF2F6FB2);
-        ctrlButton.setBackground(armed ? held : null);
-        ctrlButton.setTextColor(armed ? 0xFFFFFFFF : 0xFFDCDCDC);
+        key.setBackground(armed ? held : null);
+        key.setTextColor(armed ? 0xFFFFFFFF : 0xFFDCDCDC);
     }
 
     /**
@@ -1164,22 +1196,55 @@ abstract class PageActivity extends Activity implements RunCommandReceiver.Liste
     }
 
     /**
-     * The key typed while Ctrl was armed, as the control code it names.
+     * Sends one of the footer's keys to the PTY, with Ctrl and Alt applied.
      *
-     * <p>Ctrl is spent on that one key, whether or not it names a control code,
-     * the way a terminal's own Ctrl key behaves.
+     * <p>These are the keys a phone keyboard cannot type: a TUI that never sees
+     * Escape, Tab or an arrow cannot be navigated at all. Termux's extra-keys
+     * row exists for the same reason, and the modifiers behave the same way -
+     * one key, then spent.
+     */
+    private void type(byte[] bytes) {
+        if (!inputEnabled || bytes.length == 0) {
+            return;
+        }
+        byte[] sent = control(bytes);
+        Diagnostics.log(this, "key:" + sent.length);
+        liveStream.send(sent);
+    }
+
+    /**
+     * The key typed while Ctrl or Alt was armed, with that modifier applied.
+     *
+     * <p>Each modifier is spent on that one key, whether or not it changes it,
+     * the way a terminal's own modifier behaves: Ctrl names a control code, and
+     * Alt is the escape prefix xterm sends in front of the key.
      */
     private byte[] control(byte[] typed) {
-        if (!ctrlArmed || typed.length == 0) {
+        boolean ctrl = ctrlArmed;
+        boolean alt = altArmed;
+        if ((!ctrl && !alt) || typed.length == 0) {
             return typed;
         }
-        ui.post(() -> setCtrlArmed(false));
-        int code = controlCode((char) typed[0]);
-        if (code < 0) {
-            return typed;
+        if (ctrl) {
+            ui.post(() -> setCtrlArmed(false));
         }
-        byte[] out = typed.clone();
-        out[0] = (byte) code;
+        if (alt) {
+            ui.post(() -> setAltArmed(false));
+        }
+        byte[] out = typed;
+        if (ctrl) {
+            int code = controlCode((char) typed[0]);
+            if (code >= 0) {
+                out = typed.clone();
+                out[0] = (byte) code;
+            }
+        }
+        if (alt) {
+            byte[] prefixed = new byte[out.length + 1];
+            prefixed[0] = 0x1b;
+            System.arraycopy(out, 0, prefixed, 1, out.length);
+            out = prefixed;
+        }
         return out;
     }
 
