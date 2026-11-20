@@ -3,6 +3,12 @@
 # viewport, selection, key encoder and reply sink have no Android dependency,
 # so this needs no device, no Gradle and no test framework - only a javac.
 #
+# The files are found, not listed: a new model, and a new `*Test.java`, runs here
+# without editing this script - the same way the instrumented tests are found by
+# their runner rather than named one by one. `TerminalView` and
+# `TerminalAccessibility` import android.* and need android.jar; the view is
+# covered on a device by `samples/e2e.sh`.
+#
 #   bash terminal/test.sh
 set -euo pipefail
 
@@ -11,50 +17,18 @@ work=$here/out/test
 rm -rf "$work"
 mkdir -p "$work"
 
+# Every model in the module except the two that draw and speak.
+mapfile -t sources < <(find "$here/src/main/java" -name '*.java' \
+    ! -name TerminalView.java ! -name TerminalAccessibility.java | sort)
+# TestSupport is compiled but not run: it is the suites' shared assertion helper.
+mapfile -t test_sources < <(find "$here/src/test/java" -name '*.java' | sort)
+mapfile -t tests < <(find "$here/src/test/java" -name '*Test.java' | sort)
+
 javac -nowarn --release 17 -d "$work" \
-    "$here/src/main/java/io/github/mbanucu/terminal/Screen.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/Sgr.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/CsiCommands.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/EscapeParser.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/Scrollback.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/HistoryRow.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/AnsiPalette.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/Width.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/CellAttributes.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/Viewport.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/Selection.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/KeyEncoder.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/ReplySink.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/Modes.java" \
-    "$here/src/main/java/io/github/mbanucu/terminal/Replies.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/TestSupport.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/CursorTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/EraseTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/ScrollTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/SequenceTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/InputModeTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/AttributeTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/WideTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/ColourTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/WritingTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/ScrollbackTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/ViewportTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/SelectionTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/KeyEncoderTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/CharacterTest.java" \
-    "$here/src/test/java/io/github/mbanucu/terminal/QueryReplyTest.java"
-java -cp "$work" io.github.mbanucu.terminal.CursorTest
-java -cp "$work" io.github.mbanucu.terminal.EraseTest
-java -cp "$work" io.github.mbanucu.terminal.ScrollTest
-java -cp "$work" io.github.mbanucu.terminal.SequenceTest
-java -cp "$work" io.github.mbanucu.terminal.InputModeTest
-java -cp "$work" io.github.mbanucu.terminal.AttributeTest
-java -cp "$work" io.github.mbanucu.terminal.WideTest
-java -cp "$work" io.github.mbanucu.terminal.ColourTest
-java -cp "$work" io.github.mbanucu.terminal.WritingTest
-java -cp "$work" io.github.mbanucu.terminal.ScrollbackTest
-java -cp "$work" io.github.mbanucu.terminal.ViewportTest
-java -cp "$work" io.github.mbanucu.terminal.SelectionTest
-java -cp "$work" io.github.mbanucu.terminal.KeyEncoderTest
-java -cp "$work" io.github.mbanucu.terminal.CharacterTest
-java -cp "$work" io.github.mbanucu.terminal.QueryReplyTest
+    "${sources[@]}" "${test_sources[@]}"
+
+for file in "${tests[@]}"; do
+    class=${file#"$here/src/test/java/"}
+    class=${class%.java}
+    java -cp "$work" "${class//\//.}"
+done

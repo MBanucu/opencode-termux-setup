@@ -95,7 +95,11 @@ at all.
 ## Tests
 
 `bash terminal/test.sh` compiles the grid, its history rows and colour tables,
-and the viewport with `src/test`, then runs them on the JVM. The screen checks
+and the viewport with `src/test`, then runs them on the JVM. It discovers the
+sources and every `*Test.java` instead of naming them, so a new suite runs
+without being registered; `test/local-build.sh` runs it next to the app suite and
+`.github/workflows/android.yml` runs it on every push that touches `terminal/`.
+The screen checks
 cover cursor addressing, erases,
 insert/delete, scroll regions, primary-screen scrollback (limits, colours,
 resize, alternate-screen isolation and `ED 3`),

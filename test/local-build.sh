@@ -126,6 +126,18 @@ if $build; then
     echo "   test: $(wc -c < "$test_apk") bytes"
 fi
 
+# --- terminal JVM suite --------------------------------------------------------
+# The grid and its models are plain Java: no device, no Gradle, and no part of the
+# samples, which only happen to compile the same module. It runs next to the app
+# suite, so one build check covers both halves of the repository's tests.
+if $run_tests; then
+    echo
+    echo "== terminal JVM suite =="
+    terminal_start=$SECONDS
+    bash "$root/terminal/test.sh"
+    echo "   terminal suite in $((SECONDS - terminal_start))s"
+fi
+
 # --- end-to-end suite ----------------------------------------------------------
 if $run_tests; then
     echo
@@ -154,7 +166,6 @@ if $run_samples; then
     echo
     echo "== sample apps =="
     samples_start=$SECONDS
-    bash "$root/terminal/test.sh"
     bash "$root/samples/build.sh" all
     if ! bash "$root/samples/e2e.sh" ${only:+--only "$only"}; then
         echo "samples FAILED after $((SECONDS - samples_start))s" >&2

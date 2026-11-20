@@ -10,6 +10,7 @@ on:
   push:
     paths:
       - 'android/**'
+      - 'terminal/**'
       - 'fdroiddata/**'
       - 'docs/reproducible-builds.md'
       - 'test/**'
@@ -52,6 +53,12 @@ jobs:
         run: |
           pip install --quiet pyyaml
           bash test/fdroid-metadata-test.sh
+
+      # The terminal module's grid and models are plain Java, so its suite needs
+      # no SDK and no device: it runs here, next to the app build, instead of
+      # only on the phone. The view itself is device-only (samples/e2e.sh).
+      - name: Terminal JVM suite
+        run: bash terminal/test.sh
 
       - name: Wrapper
         working-directory: android
