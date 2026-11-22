@@ -8,19 +8,23 @@ modifier-key, query-reply and bracketed-paste slices.
 Phase 1 is most of the way there: the module parses the escapes a TUI uses,
 keeps a 3000-row primary-screen scrollback with colours and attributes, has a
 cell-range selection model that joins wrapped rows, answers the common device
-queries, and encodes hardware keys including modified cursor keys. Thirteen JVM
-suites (298 checks) pass without a device, and `samples/native-terminal` builds.
+queries, and encodes hardware keys including modified cursor keys. Fifteen JVM
+suites (330 checks) pass without a device, and the module's demo app builds.
+
+The module and its demo apps now live in
+[`MBanucu/android-accessible-terminal`](https://github.com/MBanucu/android-accessible-terminal);
+this repository keeps only the app and the plan for moving it onto the view.
 
 What remains is concentrated in four places: the selection/copy UI (1.2),
 mouse encoding and paste wrapping (1.5), combining marks and emoji (1.6), and
 any measurement at all (1.8). The app is still on the xterm page;
 `PageActivity` has only been read, not changed.
 
-The app's terminal page currently uses a WebView and xterm.js. The
-[`terminal/`](../terminal/README.md) module can draw the same bytes in a native
-`View`, with row nodes and an editable prompt that a screen reader can use. This
-is the plan for moving the app onto it without losing the terminal features the
-page has today.
+The app's terminal page currently uses a WebView and xterm.js. The extracted
+[`android-accessible-terminal`](https://github.com/MBanucu/android-accessible-terminal)
+module can draw the same bytes in a native `View`, with row nodes and an editable
+prompt that a screen reader can use. This is the plan for moving the app onto it
+without losing the terminal features the page has today.
 
 ## Why
 
@@ -69,8 +73,8 @@ page has today.
   80-column fit uses the face's real advance.
 - [x] `tui-width.py` reproduces the block-glyph overhang with system monospace
   and shows it gone with the bundled font.
-- [x] `samples/native-terminal` proves the view against a real Termux session,
-  typing and resize included.
+- [x] The module's `native-terminal` sample proves the view against a real
+  Termux session, typing and resize included.
 - [x] Primary-screen scrollback model: a 3000-row default, per-cell colours,
   resize, alternate-screen isolation, partial-region exclusion, `ED 3`, and
   `textWithHistory()`; `TerminalView.screenText()` includes it.
@@ -136,7 +140,7 @@ agreed.
 
 ## Phase 1 — terminal behavior
 
-Do these in `terminal/src/main/java` (and the JVM suites under
+Do these in the module's `terminal/src/main/java` (and its JVM suites under
 `terminal/src/test`) before touching the app beyond the flag.
 
 ### 1.1 Scrollback and touch scrolling
@@ -393,12 +397,12 @@ retired.
 ## References
 
 - [TTY accessibility research](../docs/tty-accessibility-research.md)
-- [Terminal module README](../terminal/README.md)
+- [Terminal module and its demo apps](https://github.com/MBanucu/android-accessible-terminal)
 - [Sample apps](../samples/README.md)
 - [xterm page](../android/app/src/main/assets/terminal.html)
 - [PageActivity](../android/app/src/main/java/io/github/mbanucu/opencodesetup/PageActivity.java)
 - [TerminalActivity](../android/app/src/main/java/io/github/mbanucu/opencodesetup/TerminalActivity.java)
 - [LiveStream](../android/app/src/main/java/io/github/mbanucu/opencodesetup/LiveStream.java)
 - [TermuxCommands](../android/app/src/main/java/io/github/mbanucu/opencodesetup/TermuxCommands.java)
-- [Native terminal sample](../samples/native-terminal)
-- [Width test TUI](../samples/native-terminal/assets/tui-width.py)
+- [Native terminal sample](https://github.com/MBanucu/android-accessible-terminal/tree/main/samples/native-terminal)
+- [Width test TUI](https://github.com/MBanucu/android-accessible-terminal/blob/main/samples/native-terminal/assets/tui-width.py)

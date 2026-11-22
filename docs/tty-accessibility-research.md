@@ -43,10 +43,11 @@ semantics, and which view consumes it decides whether a reader can see anything.
 
 ## What was measured, and how
 
-Three sample apps (`samples/native-terminal`, `samples/a11y-probe`,
-`samples/xterm-a11y`) were built without Gradle, installed over adb, and driven
+Three sample apps were built without Gradle, installed over adb, and driven
 by an `AccessibilityService` — the same class of consumer as TalkBack. Nothing
-here is inferred from documentation alone.
+here is inferred from documentation alone. `samples/xterm-a11y` is still in this
+repository; `native-terminal` and `a11y-probe` moved with the view to
+[`android-accessible-terminal`](https://github.com/MBanucu/android-accessible-terminal).
 
 ### 1. An app can own a PTY, and can resize it itself
 
@@ -111,9 +112,10 @@ here, and the app's job is only the view.
 
 `native-terminal` also draws its screen itself and publishes it as a virtual view
 hierarchy: one node per visible line, plus an editable node for the prompt. The view
-and its grid now live in the [`terminal/`](../terminal/README.md) module and are
-compiled into the sample; the transport stayed in the sample, because that is an app
-decision. Dumped through the accessibility service:
+and its grid now live in the extracted
+[`android-accessible-terminal`](https://github.com/MBanucu/android-accessible-terminal)
+library and are compiled into the sample; the transport stayed in the sample, because
+that is an app decision. Dumped through the accessibility service:
 
 ```
 io.github.mbanucu.samples.nativeterminal.TerminalView ...
@@ -402,8 +404,9 @@ with `ioctl(TIOCSWINSZ)`.
    measured to be the difference between zero and 22 readable row nodes, and it is
    reversible.
 2. **Then do C for every page, not only the log pages.** Install and check output
-   is a log, not a screen, so `samples/native-terminal --ez termux true` - the
-   same termux transport, the same bytes, a native view - is already the shape to
+   is a log, not a screen, so `native-terminal --ez termux true` in
+   [`android-accessible-terminal`](https://github.com/MBanucu/android-accessible-terminal) -
+   the same termux transport, the same bytes, a native view - is already the shape to
    copy: it was measured with an interactive session (§5), typing included. Do it
    for the terminal page last, if only because a TUI's announcements need the
    quiet-window design §5 mentions.

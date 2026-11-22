@@ -9,7 +9,7 @@
 #   bash test/local-build.sh --offline       # same, without Gradle hitting the network
 #   bash test/local-build.sh --skip-tests    # build only, print the APK paths
 #   bash test/local-build.sh --skip-samples  # the app and its suite, not the samples
-#   bash test/local-build.sh --samples       # only the sample apps' checks
+#   bash test/local-build.sh --samples       # only the sample app
 #   bash test/local-build.sh --only <class>[#method]   # one test instead of the suite
 #
 # Needs: JDK 17+, an Android SDK (ANDROID_HOME, ANDROID_SDK_ROOT, ~/android-sdk
@@ -53,15 +53,15 @@ while [ $# -gt 0 ]; do
             shift 2 ;;
         --help|-h)
             echo "usage: bash test/local-build.sh [--offline] [--skip-tests] [--skip-samples]"
-            echo "       bash test/local-build.sh --samples [--only <check>]"
+            echo "       bash test/local-build.sh --samples"
             echo "       bash test/local-build.sh --only <class>[#method]"
             exit 0 ;;
         *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
 done
 
-# `--only` names one instrumented test; that is not the samples suite, which
-# would otherwise run its whole set around a request for a single test.
+# `--only` names one instrumented test; building the sample app is not part of
+# that request, so it stays a build-only run.
 if [ -n "$only" ] && ! $samples_only; then
     run_samples=false
 fi
@@ -126,18 +126,6 @@ if $build; then
     echo "   test: $(wc -c < "$test_apk") bytes"
 fi
 
-# --- terminal JVM suite --------------------------------------------------------
-# The grid and its models are plain Java: no device, no Gradle, and no part of the
-# samples, which only happen to compile the same module. It runs next to the app
-# suite, so one build check covers both halves of the repository's tests.
-if $run_tests; then
-    echo
-    echo "== terminal JVM suite =="
-    terminal_start=$SECONDS
-    bash "$root/terminal/test.sh"
-    echo "   terminal suite in $((SECONDS - terminal_start))s"
-fi
-
 # --- end-to-end suite ----------------------------------------------------------
 if $run_tests; then
     echo
@@ -157,21 +145,18 @@ elif $build; then
     echo "  bash test/android-e2e.sh \"$apk\" \"$test_apk\""
 fi
 
-# --- sample apps ---------------------------------------------------------------
-# The samples are not Gradle modules and have their own build and checks; running
-# them from here is what keeps one command - and one SDK lookup - for the whole
-# repository. The checks install the APKs and drive the probe themselves.
+# --- sample app ----------------------------------------------------------------
+# The xterm-a11y sample is not a Gradle module and has its own build; running it
+# from here is what keeps one command - and one SDK lookup - for the repository.
+# The terminal view and its demo apps are in their own repository now:
+# https://github.com/MBanucu/android-accessible-terminal
 if $run_samples; then
     cd "$root"
     echo
-    echo "== sample apps =="
+    echo "== sample app =="
     samples_start=$SECONDS
     bash "$root/samples/build.sh" all
-    if ! bash "$root/samples/e2e.sh" ${only:+--only "$only"}; then
-        echo "samples FAILED after $((SECONDS - samples_start))s" >&2
-        exit 1
-    fi
-    echo "   samples in $((SECONDS - samples_start))s"
+    echo "   sample in $((SECONDS - samples_start))s"
 fi
 
 echo

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds one sample app into samples/out/<app>.apk without Gradle.
 #
-#   bash samples/build.sh native-terminal
-#   bash test/local-build.sh --samples   # builds them all, then runs their checks
+#   bash samples/build.sh xterm-a11y
+#   bash test/local-build.sh --samples   # builds it
 #
 # The point of these samples is to be readable and runnable on the device this
 # repository was written on, where Gradle's aapt2 has no aarch64 build. The steps
@@ -48,8 +48,7 @@ app=${1:-}
 case "$app" in
     all)
         shift
-        bash "$here/build.sh" native-terminal
-        exec bash "$here/build.sh" a11y-probe "$@"
+        exec bash "$here/build.sh" xterm-a11y "$@"
         ;;
     test|--test)
         shift
@@ -103,15 +102,7 @@ aapt2 link -o "$work/base.apk" \
 
 # --- java ----------------------------------------------------------------------
 echo "== $app: javac =="
-# The terminal view is a module, not part of any one app: terminal/src is compiled
-# into every sample, the way a library module's source set would be. Only the
-# classes a sample references end up in its dex, so compiling it everywhere costs
-# a second and keeps the module honest about being self-contained.
-if grep -rq 'io\.github\.mbanucu\.terminal' "$dir/src" 2>/dev/null; then
-    mapfile -t sources < <(find "$dir/src" "$work/gen" "$root/terminal/src/main/java" -name '*.java')
-else
-    mapfile -t sources < <(find "$dir/src" "$work/gen" -name '*.java' 2>/dev/null)
-fi
+mapfile -t sources < <(find "$dir/src" "$work/gen" -name '*.java' 2>/dev/null)
 javac -nowarn --release 17 -classpath "$android_jar" -d "$work/classes" "${sources[@]}"
 
 python3 - "$work/classes" "$work/classes.jar" <<'EOF'

@@ -7,7 +7,7 @@ of them look like harmless simplifications from the outside.
 
 Commands referenced here are the ones in the README: `bash test/local-build.sh`
 builds and runs everything, `--only <class>[#method]` runs one test class,
-`--samples` runs only the sample apps' checks, and
+`--samples` builds the xterm-a11y sample only, and
 `test/android-e2e.sh --no-record --only <class>` skips the recording.
 
 ## Test the page a user opens, not a shortcut into it
