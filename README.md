@@ -158,6 +158,16 @@ dpkg --configure -a
 
 The packaging work belongs to [bd-loser/opencode-bionic](https://github.com/bd-loser/opencode-bionic) (MIT). OpenCode itself is [anomalyco/opencode](https://github.com/anomalyco/opencode) (MIT). The app's terminal is [xterm.js](https://xtermjs.org) 5.5.0 with the fit addon, vendored under `android/app/src/main/assets/xterm/` (MIT). This repo only documents and automates the install for this device.
 
+## Terminal view
+
+The native accessible terminal view lives in its own repository,
+[MBanucu/android-accessible-terminal](https://github.com/MBanucu/android-accessible-terminal),
+under **GPL-3.0-or-later**, and is published to Maven Central as
+`io.github.mbanucu:android-accessible-terminal` (0.2.0 is the first release there).
+The app does not link it yet: [`docs/terminal-module-roadmap.md`](docs/terminal-module-roadmap.md)
+is the plan for replacing the xterm.js page with it. When it does, that repository
+at the pinned version is the corresponding source for the library.
+
 ## Licence
 
 This repository — `install.sh`, `uninstall.sh`, the documentation and the Android app under `android/` — is **GPL-3.0-or-later**. The full text is in [`LICENSE`](LICENSE). opencode and the packages built by bd-loser/opencode-bionic keep their own MIT licence; neither is redistributed here.
