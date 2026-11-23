@@ -538,7 +538,10 @@ public final class SetupFlowTest {
             return "";
         }
         try (RandomAccessFile in = new RandomAccessFile(file, "r")) {
-            long start = Math.min(mark, in.length());
+            // Diagnostics drops the log at its size limit. A mark from before
+            // that rotation is past the end of the new file; reading from there
+            // would hide the very events the caller is waiting for.
+            long start = in.length() < mark ? 0 : mark;
             in.seek(start);
             byte[] buffer = new byte[(int) (in.length() - start)];
             in.readFully(buffer);

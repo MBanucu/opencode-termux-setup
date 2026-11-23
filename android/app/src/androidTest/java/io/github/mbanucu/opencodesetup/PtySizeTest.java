@@ -135,7 +135,9 @@ public final class PtySizeTest {
             return "";
         }
         try (RandomAccessFile file = new RandomAccessFile(events, "r")) {
-            long start = Math.min(mark, file.length());
+            // Diagnostics rotates the log at its size limit; a mark from the
+            // old file is past the end of the new one, not a valid offset.
+            long start = file.length() < mark ? 0 : mark;
             byte[] buffer = new byte[(int) (file.length() - start)];
             file.seek(start);
             file.readFully(buffer);
