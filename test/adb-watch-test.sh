@@ -42,6 +42,17 @@ if ! command -v adb >/dev/null 2>&1; then
     exit 3
 fi
 
+# adb-watch reconnects "the first attached device"; it has no serial to choose.
+# With an emulator beside the phone it would see the emulator and never try the
+# dropped phone, so this check needs the phone to be the only device.
+serials=$(adb devices 2>/dev/null | awk 'NR > 1 && $2 == "device" { print $1 }')
+count=$(printf '%s\n' "$serials" | grep -c . || true)
+if [ "$count" -ne 1 ]; then
+    say "skip adb watcher: it reconnects the only attached device; found ${count}: $(printf '%s ' $serials)"
+    exit 3
+fi
+serial=$serials
+
 line_count() {
     [ -f "$log" ] && wc -l < "$log" | tr -d ' ' || echo 0
 }
@@ -50,10 +61,6 @@ watcher_running() {
     local pid
     pid=$(cat "$pidfile" 2>/dev/null || true)
     [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
-}
-
-device_serial() {
-    adb devices 2>/dev/null | awk 'NR > 1 && $2 == "device" { print $1; exit }'
 }
 
 # Blocks until a line added after $1 matches $2, or $3 seconds pass.
@@ -69,8 +76,6 @@ if ! watcher_running; then
         || fail "the watcher never reported a connected device (log: $log)"
 fi
 
-serial=$(device_serial)
-[ -n "$serial" ] || fail "the watcher is running but adb has no device"
 say "ok   watcher is running and connected to $serial"
 
 before=$(line_count)
@@ -80,5 +85,5 @@ adb disconnect "$serial" >/dev/null 2>&1 || true
 await_log "$before" 'reconnected:' 45 \
     || fail "the watcher did not log a reconnect after the transport dropped"
 timeout 10 adb wait-for-device || fail "adb has no device after the reconnect"
-say "ok   watcher reconnected after the transport dropped: $(device_serial)"
+say "ok   watcher reconnected after the transport dropped: $serial"
 say "PASS adb watcher checks"
