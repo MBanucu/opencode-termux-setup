@@ -1,0 +1,194 @@
+name: emulator-ui
+
+# The hosted x86_64 half of the two-tier e2e gate.
+#
+# This job runs only the `ui` and `pty` groups from test/e2e-groups.sh: the app
+# shell, the consent and uninstall pages, the permission-denial path, and the
+# terminal/PTY tests. It never installs opencode. That is deliberate:
+# opencode-bionic is an aarch64 Bionic build and install.sh refuses any other
+# `uname -m`, so a hosted x86_64 emulator can cover these pages but cannot prove
+# the setup flow. The full gate is .github/workflows/e2e-arm64.yml on a
+# self-hosted `android-arm64` runner.
+#
+# The job name is `ui-only` so the check in a PR or branch-protection list says
+# exactly what it covers. A missing emulator, a boot timeout, an empty class
+# selection or a skipped phase fails the job; there is no continue-on-error.
+#
+# Termux here is only the container for RUN_COMMAND and the PTY. It is a
+# debuggable GitHub build so the workflow can write allow-external-apps before
+# first launch; opencode is not installed and the workflow asserts that.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'test/**'
+      - '.github/workflows/emulator-ui.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TERMUX_VERSION: v0.118.3
+  TERMUX_ASSET: termux-app_v0.118.3+github-debug_x86_64.apk
+  TERMUX_SHA256: 3550e61f4d9eb49b712fd1bd9519dc37085a4d8eb597c57a340f0a64859b7144
+
+jobs:
+  ui-only:
+    name: ui-only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Fail before the emulator boots if the selection no longer matches the
+      # classes, or if --ui-only would admit an install-dependent test.
+      - name: Check the e2e group split
+        run: bash test/e2e-groups-test.sh
+
+      # KVM has to be readable by the runner user, not only root. Without this
+      # the emulator falls back to software and eventually times out.
+      - name: KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Android SDK
+        run: |
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          manager=$(command -v sdkmanager || echo "$sdk/cmdline-tools/latest/bin/sdkmanager")
+          yes | "$manager" --licenses >/dev/null 2>&1 || true
+          "$manager" "platforms;android-35" "build-tools;35.0.0" "platform-tools" >/dev/null
+          echo "sdk=$sdk" >>"$GITHUB_ENV"
+
+      # assembleDebugAndroidTest compiles the classes the selection names. A
+      # class that no longer compiles, or a group that names a class the APK
+      # does not contain, fails before any emulator time is spent.
+      - name: Assemble
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest
+
+      # GitHub's debug Termux build is debuggable, which is what lets the
+      # workflow write ~/.termux/termux.properties before the first launch. The
+      # x86_64 APK is the one that matches the emulator ABI.
+      - name: Fetch debuggable Termux
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/termux.apk" \
+            "https://github.com/termux/termux-app/releases/download/${TERMUX_VERSION}/${TERMUX_ASSET}"
+          echo "${TERMUX_SHA256}  $RUNNER_TEMP/termux.apk" | sha256sum -c -
+
+      - name: Run ui-only instrumentation
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-boot-timeout: 1200
+          disable-animations: true
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -no-snapshot -camera-back none -camera-front none
+          script: |
+            set -euo pipefail
+
+            # The action only runs this script once the emulator has booted, but
+            # say which device was chosen and refuse to test anything else.
+            serial=$(adb get-serialno | tr -d '\r')
+            case "$serial" in
+              emulator-*) ;;
+              *) echo "::error::no emulator device: adb get-serialno returned '$serial'"; exit 1 ;;
+            esac
+            abi=$(adb shell getprop ro.product.cpu.abi | tr -d '\r')
+            [ "$abi" = x86_64 ] || {
+              echo "::error::expected an x86_64 AVD, got '$abi'"; exit 1;
+            }
+            echo "emulator $serial, abi $abi"
+
+            adb install -r -g "$RUNNER_TEMP/termux.apk"
+
+            # allow-external-apps has to exist before Termux first reads it.
+            # run-as is why the workflow fetches the debuggable build.
+            adb shell "run-as com.termux sh -c '
+              mkdir -p files/home/.termux
+              if ! grep -qx allow-external-apps=true files/home/.termux/termux.properties 2>/dev/null; then
+                echo allow-external-apps=true >> files/home/.termux/termux.properties
+              fi
+            '"
+
+            # First launch extracts the bundled bootstrap; wait for its bash.
+            adb shell am start -W -n com.termux/.app.TermuxActivity
+            for _ in $(seq 1 90); do
+              adb shell run-as com.termux test -x files/usr/bin/bash 2>/dev/null && break
+              sleep 2
+            done
+            adb shell run-as com.termux test -x files/usr/bin/bash || {
+              echo "::error::Termux bootstrap never produced files/usr/bin/bash"; exit 1;
+            }
+
+            # The app wraps commands in `script` and resizes with `stty`; the
+            # base bootstrap does not guarantee them. No opencode, and no
+            # package from the opencode repository.
+            adb shell "run-as com.termux env \
+              HOME=/data/data/com.termux/files/home \
+              PREFIX=/data/data/com.termux/files/usr \
+              PATH=/data/data/com.termux/files/usr/bin:/system/bin \
+              bash -lc 'pkg update -y && pkg install -y util-linux coreutils'"
+
+            if adb shell run-as com.termux test -e files/usr/bin/opencode; then
+              echo "::error::opencode is installed; the ui-only job must not depend on it"
+              exit 1
+            fi
+
+            # The script uses the emulator adb already lists and refuses to run
+            # the install group. Exact test counts are checked by the script.
+            bash test/android-e2e.sh --ui-only --no-record
+
+      # Runs even after a failed suite so a red job still uploads the evidence,
+      # and fails itself when a phase is absent or the install group slipped in.
+      - name: Assert the ui-only phases ran
+        if: always()
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/e2e-logs"
+          for file in setup-ui.log terminal.log denial.log; do
+            [ -s "$dir/$file" ] || {
+              echo "::error::$file is missing: that phase did not run"; exit 1;
+            }
+          done
+          grep -qF 'OK (3 tests)' "$dir/setup-ui.log"
+          grep -qF 'OK (13 tests)' "$dir/terminal.log"
+          grep -qF 'OK (1 test)' "$dir/denial.log"
+          if [ -e "$dir/install.log" ]; then
+            echo "::error::the install phase ran in the ui-only job"; exit 1
+          fi
+          if grep -R -q 'SetupFlowInstallTest' "$dir"; then
+            echo "::error::an install-dependent test was selected"; exit 1
+          fi
+
+      - name: Upload instrumentation output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-ui-instrumentation
+          path: ${{ runner.temp }}/e2e-logs
+          if-no-files-found: error

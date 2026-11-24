@@ -61,6 +61,12 @@ jobs:
           pip install --quiet pyyaml
           bash test/fdroid-metadata-test.sh
 
+      # The e2e split is a dependency boundary, not a label: a new @Test class
+      # that is not classified would otherwise run in no phase and look green.
+      # This needs no SDK or device, so it belongs with the fast checks.
+      - name: e2e group split
+        run: bash test/e2e-groups-test.sh
+
   build:
     name: build debug apk
     needs: metadata

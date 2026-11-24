@@ -72,6 +72,32 @@ test/.venv/bin/pip install --no-index --find-links test/.deps -r test/requiremen
 
 `test/local-build.sh` finds the SDK, writes the git-ignored `android/local.properties`, points the Android Gradle Plugin at Termux's aarch64 `aapt2`, and hands both APKs to `test/android-e2e.sh`. It then builds the sample APKs and runs their checks from the same command, so every suite has one entry; `--skip-samples` leaves them out and `--samples` runs only them. Both APKs must be built by the same run: CI signs each one with its own throwaway debug keystore, so a locally built app paired with a CI test APK fails immediately with a permission denial. A local build is also not byte-identical to CI's, because aapt2 16.0.0.4 packages resources differently — the reproducible release job stays the authority for that. `bash test/adb-watch-test.sh` checks that the installed watcher reconnects after the transport drops.
 
+### Two e2e tiers: hosted UI/pty, self-hosted full setup
+
+The instrumented suite is split by dependency in [`test/e2e-groups.sh`](test/e2e-groups.sh). The CI check name says which tier a green result covered:
+
+| Group | Needs | Runs where |
+|---|---|---|
+| `ui` | Termux installed; no opencode, no installer | hosted x86_64, `--ui-only` |
+| `pty` | Termux with `script`/`stty`; no opencode | hosted x86_64, `--ui-only` |
+| `install` | aarch64 Termux, network, the real opencode package | self-hosted `android-arm64` only |
+
+```bash
+bash test/android-e2e.sh                     # full suite, needs an arm64 device
+bash test/android-e2e.sh --ui-only           # app shell, consent, uninstall, pty
+bash test/android-e2e.sh --ui-only --only io.github.mbanucu.opencodesetup.PtyRenderingTest
+bash test/android-e2e.sh --ui-only --list    # print the selection, no device
+bash test/e2e-groups-test.sh                 # check the split and refusal logic
+```
+
+`--ui-only` selects the `ui` and `pty` phases and **refuses** an install-dependent class or method instead of running it and skipping assertions. The install phase is never merely skipped: in full mode `test/android-e2e.sh` requires the `install` class's exact test count, and in UI mode it refuses the group before touching adb.
+
+The hosted job is [`emulator-ui.yml`](.github/workflows/emulator-ui.yml), named **`ui-only`**, on `push` to `main` and `workflow_dispatch`. It boots an API 35 `google_apis` x86_64 AVD with KVM, installs a debuggable Termux (for `RUN_COMMAND` and the PTY), asserts opencode is absent, and uploads every phase's instrumentation output. It is not the setup-flow gate and must not be labelled as one.
+
+The full gate is [`e2e-arm64.yml`](.github/workflows/e2e-arm64.yml), a `workflow_dispatch` job on a self-hosted `android-arm64` runner. It is opt-in until such a runner exists: dispatching it without one leaves the job **queued and blocked**, never succeeded. Do not add `continue-on-error`, an x86_64 fallback, or a conditional skip - any of those would green the release gate without the real install.
+
+Neither hosted job can prove the full flow. opencode-bionic is an aarch64 **Bionic** build, `install.sh` rejects any other `uname -m`, and an x86_64 emulator cannot execute that ELF. API 35 ARM translation is for APK native libraries, not for a Termux userspace running aarch64 ELF binaries; treating a translated install as a pass would be a false green. The full suite needs a real aarch64 phone, which is that self-hosted runner.
+
 On GitHub, the fast `F-Droid metadata` job runs on every pull request that touches `android/**`, `fdroiddata/**`, `test/**` or the workflow, and is the check to mark required in branch protection. The debug and reproducible release builds still run on pushes (including tags) and manual dispatch, never on pull requests. A version-bump PR normally names an `android-v*` tag that is created when the release is tagged, so the PR run prints a `warn` for a missing tag while the same state on `main` fails; run either mode locally with:
 
 ```bash
