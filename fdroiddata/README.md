@@ -113,7 +113,10 @@ in [freebuff-native](https://github.com/MBanucu/freebuff-native-termux):
   must exist for that `versionCode`. (`1` is the first release.)
 - `bash test/fdroid-metadata-test.sh` checks the fields that can be checked
   without fdroidserver: app id agreement, version parity, tag existence, summary
-  presence and length limits, changelog presence, and YAML parseability.
+  presence and length limits, changelog presence, and YAML parseability. On a
+  pull request a missing `android-v*` tag is printed as a `warn` and does not
+  fail the check, because the tag is created with the release; on `main` and on
+  tag pushes the same state fails. The PR job is named `F-Droid metadata`.
 - Screenshots are not committed yet. F-Droid does not require them, and a
   fabricated one would be worse than none; `fastlane/metadata/android/en-US/images/phoneScreenshots/`
   is where they go once someone runs the app on a device.

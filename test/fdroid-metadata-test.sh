@@ -5,6 +5,15 @@
 # fastlane field limits, and YAML parseability.
 #
 #   bash test/fdroid-metadata-test.sh
+#   ALLOW_MISSING_TAG=1 bash test/fdroid-metadata-test.sh
+#   bash test/fdroid-metadata-test.sh --allow-missing-tag
+#
+# `Builds.commit` may name an `android-v*` tag that is created only when the
+# release is tagged.  A version-bump pull request is therefore correct while
+# the tag is still absent.  `ALLOW_MISSING_TAG=1` (or `--allow-missing-tag`)
+# turns a missing tag into a printed warning; the default is the strict
+# post-merge behaviour, where a missing tag fails the run.  Other missing
+# commits and every other check stay failures in both modes.
 #
 set -uo pipefail
 
@@ -14,8 +23,28 @@ yml="$root/fdroiddata/$id_expected.yml"
 gradle="$root/android/app/build.gradle.kts"
 fastlane="$root/android/fastlane/metadata/android/en-US"
 failures=0
+warnings=0
+allow_missing_tag=${ALLOW_MISSING_TAG:-0}
+
+for arg in "$@"; do
+    case "$arg" in
+        --allow-missing-tag) allow_missing_tag=1 ;;
+        -h | --help)
+            sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "unknown option: $arg (try --help)" >&2
+            exit 2
+            ;;
+    esac
+done
 
 pass() { printf '  ok    %s\n' "$1"; }
+warn() {
+    printf '  warn  %s\n' "$1"
+    warnings=$((warnings + 1))
+}
 fail() {
     printf '  FAIL  %s\n' "$1"
     failures=$((failures + 1))
@@ -71,6 +100,8 @@ if git -C "$root" rev-parse --git-dir >/dev/null 2>&1; then
         android-v*)
             if [ -n "$(git -C "$root" tag -l "$commit_ref")" ]; then
                 pass "tag $commit_ref exists"
+            elif [ "$allow_missing_tag" = 1 ] || [ "$allow_missing_tag" = true ]; then
+                warn "tag $commit_ref does not exist yet; allowed on pull requests, strict on main (git tag $commit_ref)"
             else
                 fail "tag $commit_ref does not exist (git tag $commit_ref)"
             fi ;;
@@ -153,7 +184,11 @@ fi
 
 echo
 if [ "$failures" -eq 0 ]; then
-    echo "all metadata checks passed"
+    if [ "$warnings" -gt 0 ]; then
+        echo "all metadata checks passed with $warnings warning(s)"
+    else
+        echo "all metadata checks passed"
+    fi
 else
     echo "$failures check(s) failed"
 fi
