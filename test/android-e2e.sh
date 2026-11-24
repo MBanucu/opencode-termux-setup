@@ -7,8 +7,15 @@
 #   bash test/android-e2e.sh --no-record                # skip the screen recording
 #
 # Needs: adb in PATH, the device authorised, Termux installed with
-# allow-external-apps=true. python3 is optional: it only adds the timing history
-# in test/.timings.db and the estimate printed while the tests run.
+# allow-external-apps=true, and the e2e requirements installed once:
+#
+#   python3 -m venv test/.venv
+#   test/.venv/bin/pip install -r test/requirements.txt
+#
+# That installs adb-harness, whose adb-connect finds the wireless-debugging port
+# when the transport has dropped. python3 is otherwise optional: it only adds
+# the timing history in test/.timings.db and the estimate printed while the
+# tests run.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -45,6 +52,60 @@ done
 timing=false
 if command -v python3 >/dev/null 2>&1 && python3 -c 'import sqlite3' >/dev/null 2>&1; then
     timing=true
+fi
+
+# --- adb connection -----------------------------------------------------------
+# Discovery and reconnection belong to adb-harness, installed from
+# test/requirements.txt. Use this repository's venv when it exists, otherwise a
+# console script already on PATH (pipx, a system install).
+harness_bin() {
+    if [ -x "$root/test/.venv/bin/$1" ]; then
+        printf '%s\n' "$root/test/.venv/bin/$1"
+    elif command -v "$1" >/dev/null 2>&1; then
+        command -v "$1"
+    else
+        return 1
+    fi
+}
+
+if ! command -v adb >/dev/null 2>&1; then
+    echo "adb is missing: install Android platform-tools (pkg install android-tools)" >&2
+    exit 3
+fi
+
+if ! adb_connect=$(harness_bin adb-connect); then
+    echo "adb-connect is missing. Install the e2e requirements once:" >&2
+    echo "  python3 -m venv test/.venv" >&2
+    echo "  test/.venv/bin/pip install -r test/requirements.txt" >&2
+    exit 3
+fi
+
+# adb-connect needs zeroconf for every discovery run. Check it here so a missing
+# python package gets its own message: adb-harness 0.2.3 still reports it as
+# "no service" (exit 1), while exit 3 is reserved for exactly this case.
+harness_python=$(head -n 1 "$adb_connect" | sed 's/^#!//; s/[[:space:]].*//')
+[ -x "$harness_python" ] || harness_python=python3
+if ! "$harness_python" -c 'import zeroconf' >/dev/null 2>&1; then
+    echo "python-zeroconf is missing from $harness_python." >&2
+    echo "Install the e2e requirements once:" >&2
+    echo "  test/.venv/bin/pip install -r test/requirements.txt" >&2
+    exit 3
+fi
+
+echo "== connect =="
+# Exit codes: 0 connected, 1 no service, 2 usage, 3 missing prerequisite.
+# Branch on them so "Wireless debugging is off" and "zeroconf is not installed"
+# cannot be mistaken for each other.
+if "$adb_connect" --timeout 8; then
+    :
+else
+    status=$?
+    case $status in
+        2) echo "adb-connect rejected its arguments (exit 2)" >&2 ;;
+        3) echo "adb-connect is missing a prerequisite (exit 3)" >&2 ;;
+        *) echo "no adb device: turn Wireless debugging on and run this again" >&2 ;;
+    esac
+    exit "$status"
 fi
 
 echo "== device =="

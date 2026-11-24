@@ -8,7 +8,17 @@ of them look like harmless simplifications from the outside.
 Commands referenced here are the ones in the README: `bash test/local-build.sh`
 builds and runs everything, `--only <class>[#method]` runs one test class,
 `--samples` builds the xterm-a11y sample only, and
-`test/android-e2e.sh --no-record --only <class>` skips the recording.
+`test/android-e2e.sh --no-record --only <class>` skips the recording. The e2e
+scripts expect the tools in `test/requirements.txt` (currently `adb-harness[mdns]`)
+in `test/.venv` or on `PATH`:
+
+```bash
+python3 -m venv test/.venv
+test/.venv/bin/pip install -r test/requirements.txt
+```
+
+Do not copy `adb-connect` or `adb-watch` back into `test/`: that is what this
+repository removed in favour of the package.
 
 ## Test the page a user opens, not a shortcut into it
 
@@ -202,10 +212,10 @@ eight columns out; the free cell is rarely the one that looks free.
 
 A test run reported `OpencodeTuiTest ... FAILED` after 37 s with `adb: no devices/
 emulators found` from the harness: the wireless transport had dropped. The port is per
-session - 44619, then 45249, then 38915 in one afternoon - so `python3 test/adb-connect.py`
-reconnects and the same APK passes. The harness log under `android/app/build/e2e-*.log`
-holds NUL bytes; read it with `tr -d '\000' < log | grep -a`, or the grep itself looks
-like it found nothing.
+session - 44619, then 45249, then 38915 in one afternoon - so `adb-connect` (installed
+from `test/requirements.txt`) reconnects and the same APK passes. The harness log under
+`android/app/build/e2e-*.log` holds NUL bytes; read it with `tr -d '\000' < log | grep -a`,
+or the grep itself looks like it found nothing.
 
 ## `ppwd` is the typing flake, not a rendering bug
 
@@ -237,12 +247,16 @@ anchored to that element, so a hide aimed at the window alone leaves the keyboar
 ## Environment facts this device has
 
 - adb connects over TCP at `127.0.0.1:<port>`, and the port changes between
-  sessions. `python3 test/adb-connect.py` finds it over mDNS - the phone
-  advertises `_adb-tls-connect._tcp` - and connects; `--pair` prints the
-  `adb pair` line. Termux's adb has no mDNS of its own (`adb mdns services`
-  answers "not supported"), and `ss`, `/proc/net/tcp6` and
-  `service.adb.tcp.port` are closed to an app, which is why the lookup uses
-  python-zeroconf instead.
+  sessions. `adb-connect` from [adb-harness](https://github.com/MBanucu/adb-harness)
+  (installed from `test/requirements.txt`, normally in `test/.venv`) finds it over
+  mDNS - the phone advertises `_adb-tls-connect._tcp` - and connects;
+  `adb-connect --pair` prints the `adb pair` line. Termux's adb has no mDNS of
+  its own (`adb mdns services` answers "not supported"), and `ss`, `/proc/net/tcp6`
+  and `service.adb.tcp.port` are closed to an app, which is why the lookup uses
+  python-zeroconf instead. adb-harness documents exit codes 0 connected,
+  1 no service, 2 usage and 3 missing prerequisite; 0.2.3 still reports a
+  missing zeroconf as 1, so `test/android-e2e.sh` pre-checks `adb` and
+  zeroconf and exits 3 itself, and also branches on 3 for a newer release.
 - That advertisement outlives the setting: with Wireless debugging off, mDNS
   still names the last port (38135 on one run here) and every address answers
   "connection refused". A refusal, not silence, is what "off" looks like.
