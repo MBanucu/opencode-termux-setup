@@ -54,14 +54,23 @@ writes its output to the same file when it finishes.
 
 ### Building and testing on the device
 
-The workflow in `.github/workflows/android.yml` is still the compiler of record, but a change can be built and checked here without pushing:
+The workflow in `.github/workflows/android.yml` is still the compiler of record, but a change can be built and checked here without pushing. The device suite needs the adb tools from [`test/requirements.txt`](test/requirements.txt) in a local venv; the first install is the only step that needs the network:
 
 ```bash
 pkg install aapt2                 # Google only ships aapt2 for x86_64
+python3 -m venv test/.venv
+test/.venv/bin/pip install -r test/requirements.txt
 bash test/local-build.sh          # build, then the app and sample suites
 ```
 
-`test/local-build.sh` finds the SDK, writes the git-ignored `android/local.properties`, points the Android Gradle Plugin at Termux's aarch64 `aapt2`, and hands both APKs to `test/android-e2e.sh`. It then builds the sample APKs and runs their checks from the same command, so every suite has one entry; `--skip-samples` leaves them out and `--samples` runs only them. Both APKs must be built by the same run: CI signs each one with its own throwaway debug keystore, so a locally built app paired with a CI test APK fails immediately with a permission denial. A local build is also not byte-identical to CI's, because aapt2 16.0.0.4 packages resources differently — the reproducible release job stays the authority for that.
+`test/requirements.txt` pins `adb-harness[mdns]`, which supplies the `adb-connect` and `adb-watch` commands: discovery and reconnection are its job, and `test/android-e2e.sh` calls `test/.venv/bin/adb-connect` (or a console script on `PATH`) before the suite. The harness documents exit `0` connected, `1` no service, `2` usage and `3` missing prerequisite; version 0.2.3 still reports a missing `python-zeroconf` as `1`, so the e2e script checks `adb` and `zeroconf` itself and exits `3` with an install hint before discovery runs. To keep a later run offline, reuse the venv or cache the wheels:
+
+```bash
+test/.venv/bin/pip download -r test/requirements.txt -d test/.deps
+test/.venv/bin/pip install --no-index --find-links test/.deps -r test/requirements.txt
+```
+
+`test/local-build.sh` finds the SDK, writes the git-ignored `android/local.properties`, points the Android Gradle Plugin at Termux's aarch64 `aapt2`, and hands both APKs to `test/android-e2e.sh`. It then builds the sample APKs and runs their checks from the same command, so every suite has one entry; `--skip-samples` leaves them out and `--samples` runs only them. Both APKs must be built by the same run: CI signs each one with its own throwaway debug keystore, so a locally built app paired with a CI test APK fails immediately with a permission denial. A local build is also not byte-identical to CI's, because aapt2 16.0.0.4 packages resources differently — the reproducible release job stays the authority for that. `bash test/adb-watch-test.sh` checks that the installed watcher reconnects after the transport drops.
 
 On GitHub, the fast `F-Droid metadata` job runs on every pull request that touches `android/**`, `fdroiddata/**`, `test/**` or the workflow, and is the check to mark required in branch protection. The debug and reproducible release builds still run on pushes (including tags) and manual dispatch, never on pull requests. A version-bump PR normally names an `android-v*` tag that is created when the release is tagged, so the PR run prints a `warn` for a missing tag while the same state on `main` fails; run either mode locally with:
 

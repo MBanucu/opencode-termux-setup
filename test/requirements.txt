@@ -1,0 +1,14 @@
+# Tools the device e2e run needs beyond adb itself.
+#
+# adb-harness finds the wireless-debugging port over mDNS and keeps the
+# connection alive; the [mdns] extra installs python-zeroconf, which is what
+# adb-connect actually uses for the lookup. Pin the version exactly: discovery
+# runs unattended on a phone, so an unreviewed upgrade is not wanted.
+#
+#   python3 -m venv test/.venv
+#   test/.venv/bin/pip install -r test/requirements.txt
+#
+# The first install needs the network. Reuse the venv afterwards, or cache the
+# wheels with `pip download -r test/requirements.txt -d test/.deps` and install
+# with `pip install --no-index --find-links test/.deps -r test/requirements.txt`.
+adb-harness[mdns]==0.2.3

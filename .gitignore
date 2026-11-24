@@ -3,6 +3,9 @@ test/.timings.db
 test/recordings/
 # The adb watcher's log and pid file belong to the machine, not the repository.
 test/out/
+# The e2e tools' venv, and any wheels cached for an offline install.
+test/.venv/
+test/.deps/
 android/local.properties
 __pycache__/
 

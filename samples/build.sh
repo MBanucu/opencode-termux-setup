@@ -163,19 +163,37 @@ echo "built $here/out/$app.apk ($(wc -c < "$here/out/$app.apk") bytes)"
 
 # --- adb ----------------------------------------------------------------------
 # A build is usually followed by an install, and the wireless-debugging port
-# changes between sessions. Look it up here rather than letting the next adb
-# command fail with "no devices"; this never fails the build, and ADB_CONNECT=0
-# skips it for an offline build.
+# changes between sessions. adb-harness (test/requirements.txt) has the lookup
+# and the watcher; this never fails the build, and ADB_CONNECT=0 skips it for an
+# offline build.
+harness_bin() {
+    if [ -x "$root/test/.venv/bin/$1" ]; then
+        printf '%s\n' "$root/test/.venv/bin/$1"
+    elif command -v "$1" >/dev/null 2>&1; then
+        command -v "$1"
+    else
+        return 1
+    fi
+}
+
 if [ "${ADB_CONNECT:-1}" != 0 ] && command -v adb >/dev/null; then
-    watcher=$root/test/adb-watch.sh
-    if [ -x "$watcher" ] && ! bash "$watcher" --status >/dev/null 2>&1; then
+    adb_watch=$(harness_bin adb-watch || true)
+    adb_connect=$(harness_bin adb-connect || true)
+    # Keep the pid and log with the rest of the repository's e2e state instead
+    # of an out/ directory relative to wherever the build was started.
+    export ADB_WATCH_OUT=${ADB_WATCH_OUT:-$root/test/out}
+    if [ -n "$adb_watch" ] && ! "$adb_watch" --status >/dev/null 2>&1; then
         echo "== $app: starting the adb port watcher"
-        setsid nohup bash "$watcher" >/dev/null 2>&1 < /dev/null &
+        setsid nohup "$adb_watch" >/dev/null 2>&1 < /dev/null &
     fi
     if adb devices 2>/dev/null | awk 'NR > 1 && $2 == "device" { found = 1 } END { exit !found }'; then
         echo "== $app: adb device already connected"
-    else
+    elif [ -n "$adb_connect" ]; then
         echo "== $app: looking up the wireless-debugging port"
-        python3 "$root/test/adb-connect.py" --timeout 4 2>&1 | sed 's/^/   /' || true
+        "$adb_connect" --timeout 4 2>&1 | sed 's/^/   /' || true
+    else
+        echo "== $app: adb-harness is not installed; skipping discovery"
+        echo "   python3 -m venv test/.venv"
+        echo "   test/.venv/bin/pip install -r test/requirements.txt"
     fi
 fi

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Checks the adb watcher reacts to a dropped transport.
 #
+# The watcher is adb-harness's `adb-watch` console script, installed from
+# test/requirements.txt; this test only proves the installed watcher reconnects
+# on this device.
+#
 # The test waits on events rather than sleeping: it streams the watcher's log
 # with `tail -F` and stops on the first matching line, and it uses
 # `adb wait-for-device` instead of polling the device list on a timer.
@@ -9,12 +13,34 @@
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
-log=${ADB_WATCH_LOG:-$here/out/adb-watch.log}
-pidfile=$here/out/adb-watch.pid
-mkdir -p "$here/out"
+export ADB_WATCH_OUT=${ADB_WATCH_OUT:-$here/out}
+log=${ADB_WATCH_LOG:-$ADB_WATCH_OUT/adb-watch.log}
+pidfile=$ADB_WATCH_OUT/adb-watch.pid
+mkdir -p "$ADB_WATCH_OUT"
 
 say() { printf '%s\n' "$*"; }
 fail() { say "FAIL $*"; exit 1; }
+
+harness_bin() {
+    if [ -x "$here/.venv/bin/$1" ]; then
+        printf '%s\n' "$here/.venv/bin/$1"
+    elif command -v "$1" >/dev/null 2>&1; then
+        command -v "$1"
+    else
+        return 1
+    fi
+}
+
+if ! watcher=$(harness_bin adb-watch); then
+    say "adb-watch is missing; install the e2e requirements first:"
+    say "  python3 -m venv test/.venv"
+    say "  test/.venv/bin/pip install -r test/requirements.txt"
+    exit 3
+fi
+if ! command -v adb >/dev/null 2>&1; then
+    say "adb is missing; install Android platform-tools (pkg install android-tools)"
+    exit 3
+fi
 
 line_count() {
     [ -f "$log" ] && wc -l < "$log" | tr -d ' ' || echo 0
@@ -38,7 +64,7 @@ await_log() {
 if ! watcher_running; then
     say "starting the watcher"
     before=$(line_count)
-    setsid nohup bash "$here/adb-watch.sh" >/dev/null 2>&1 < /dev/null &
+    setsid nohup "$watcher" >/dev/null 2>&1 < /dev/null &
     await_log "$before" 'connected:' 30 \
         || fail "the watcher never reported a connected device (log: $log)"
 fi
