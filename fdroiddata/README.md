@@ -83,6 +83,8 @@ reports `opencode --version` back.
 
 - Source: https://github.com/MBanucu/opencode-termux-setup (GPL-3.0-or-later), subdir `android`
 - Build: `gradle`, wrapper 8.9, AGP 8.7.3, compileSdk 35, minSdk 24, JDK 17
+  (the wrapper and the distribution SHA-256 live in
+  `android/gradle/wrapper/gradle-wrapper.properties`)
 - No library dependencies; the app is a few activities and one BroadcastReceiver
 - The terminal is xterm.js 5.5.0 (MIT), vendored under `app/src/main/assets/`
   with its licence and loaded from `file:///android_asset`; network loads in the
@@ -108,9 +110,9 @@ in [freebuff-native](https://github.com/MBanucu/freebuff-native-termux):
 
 ## Before clicking submit
 
-- `versionName`/`versionCode` in `android/app/build.gradle.kts` must equal the
-  `Builds` entry, and `android/fastlane/metadata/android/en-US/changelogs/1.txt`
-  must exist for that `versionCode`. (`1` is the first release.)
+- `versionName`/`versionCode` in `android/gradle/libs.versions.toml` must equal the
+  `Builds` entry, and `android/fastlane/metadata/android/en-US/changelogs/2.txt`
+  must exist for that `versionCode`. (`2` is the current release.)
 - `bash test/fdroid-metadata-test.sh` checks the fields that can be checked
   without fdroidserver: app id agreement, version parity, tag existence, summary
   presence and length limits, changelog presence, and YAML parseability. On a
@@ -124,7 +126,7 @@ in [freebuff-native](https://github.com/MBanucu/freebuff-native-termux):
 ## After it is merged
 
 - `fdroid build io.github.mbanucu.opencodesetup:1` reproduces the build locally.
-- A new release is: bump version in `build.gradle.kts`, add
+- A new release is: bump the version in `android/gradle/libs.versions.toml`, add
   `changelogs/<versionCode>.txt`, tag `android-v<versionName>`, then bump
   `Builds`, `CurrentVersion` and `CurrentVersionCode` in the YAML.
 - Update checks stay manual because this repository also tags the installer and

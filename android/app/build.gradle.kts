@@ -1,17 +1,17 @@
 plugins {
-    id("com.android.application")
+    alias(libs.plugins.android.application)
 }
 
 android {
     namespace = "io.github.mbanucu.opencodesetup"
-    compileSdk = 35
+    compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
         applicationId = "io.github.mbanucu.opencodesetup"
-        minSdk = 24
-        targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        minSdk = libs.versions.minSdk.get().toInt()
+        targetSdk = libs.versions.targetSdk.get().toInt()
+        versionCode = libs.versions.appVersionCode.get().toInt()
+        versionName = libs.versions.appVersionName.get()
         // The instrumented end-to-end tests drive the app through UI Automator,
         // which is the accessibility event stream, not screenshots.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -24,8 +24,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.toVersion(libs.versions.java.get())
+        targetCompatibility = JavaVersion.toVersion(libs.versions.java.get())
     }
 
     // Reproducible builds.  AGP otherwise embeds a dependency metadata blob that
@@ -49,11 +49,26 @@ android {
     }
 }
 
+// The instrumented dependencies are the only ones in the build, so they are the
+// only configuration worth locking.  The lockfile pins every transitive module
+// that androidTest resolves, which is what makes an offline build use the same
+// set as CI.  It does not touch the release APK, which has no dependencies.
+dependencyLocking {
+    lockMode.set(org.gradle.api.artifacts.dsl.LockMode.STRICT)
+}
+configurations.configureEach {
+    if (name.endsWith("AndroidTestCompileClasspath") ||
+        name.endsWith("AndroidTestRuntimeClasspath")
+    ) {
+        resolutionStrategy.activateDependencyLocking()
+    }
+}
+
 // Test-only, and never packaged: UI Automator and the runner live in the
 // separate androidTest APK.
 dependencies {
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test:rules:1.6.1")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.uiautomator)
 }

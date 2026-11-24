@@ -1,0 +1,41 @@
+# The single source of truth for the Android build.  F-Droid builds the wrapper
+# this file ships with, so bump `agp` and the wrapper together, and update the
+# fdroiddata notes in the same commit.
+#
+# The app itself has no runtime dependencies.  The four androidx.test libraries
+# are androidTest-only and never enter the release APK.
+
+[versions]
+# Keep this pair together: AGP 8.7.3 runs on Gradle 8.9, which is the wrapper
+# version.  docs/termux-build.md records why the AGP 9.5.2 / Gradle 9.9.2 line
+# is not used yet.
+agp = "8.7.3"
+
+# Android SDK levels and the build-tools the wrapper and CI install.
+compileSdk = "35"
+minSdk = "24"
+targetSdk = "35"
+buildTools = "35.0.0"
+
+# Bytecode level for javac.  JDK 17 or newer is required to build.
+java = "17"
+
+# The app version.  fdroiddata's `Builds`, `CurrentVersion` and
+# `CurrentVersionCode` must match these values.
+appVersionCode = "2"
+appVersionName = "0.2.0"
+
+# Test-only libraries, pinned exactly; androidTest never ships in the APK.
+androidx-test-runner = "1.6.2"
+androidx-test-rules = "1.6.1"
+androidx-test-ext-junit = "1.2.1"
+androidx-test-uiautomator = "2.3.0"
+
+[libraries]
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
+androidx-test-rules = { module = "androidx.test:rules", version.ref = "androidx-test-rules" }
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-test-ext-junit" }
+androidx-test-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "androidx-test-uiautomator" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }

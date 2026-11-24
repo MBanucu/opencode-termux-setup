@@ -54,7 +54,17 @@ writes its output to the same file when it finishes.
 
 ### Building and testing on the device
 
-The workflow in `.github/workflows/android.yml` is still the compiler of record, but a change can be built and checked here without pushing. The device suite needs the adb tools from [`test/requirements.txt`](test/requirements.txt) in a local venv; the first install is the only step that needs the network:
+The workflow in `.github/workflows/android.yml` is still the compiler of record, but a change can be built and checked here without pushing. The Gradle build is one command: `tools/termux-build.sh` finds `$HOME/android-sdk`, refuses to run without platform 35, build-tools 35.0.0 and Termux's bionic aapt2, and passes the aapt2 override only for this process. It never writes `local.properties`.
+
+```bash
+tools/termux-build.sh                       # checkBuildEnv + assembleDebug
+tools/termux-build.sh --offline lintDebug assembleDebugAndroidTest
+tools/termux-build.sh --check               # print the resolved SDK and aapt2
+```
+
+`android/local.properties.example` is the manual alternative for an IDE. [`docs/termux-build.md`](docs/termux-build.md) records the toolchain decision (still AGP 8.7.3 / Gradle 8.9), the wrapper checksum, the androidTest lockfile and the measured configuration-cache times.
+
+The device suite needs the adb tools from [`test/requirements.txt`](test/requirements.txt) in a local venv; the first install is the only step that needs the network:
 
 ```bash
 pkg install aapt2                 # Google only ships aapt2 for x86_64
@@ -98,7 +108,7 @@ The full gate is [`e2e-arm64.yml`](.github/workflows/e2e-arm64.yml), a `workflow
 
 Neither hosted job can prove the full flow. opencode-bionic is an aarch64 **Bionic** build, `install.sh` rejects any other `uname -m`, and an x86_64 emulator cannot execute that ELF. API 35 ARM translation is for APK native libraries, not for a Termux userspace running aarch64 ELF binaries; treating a translated install as a pass would be a false green. The full suite needs a real aarch64 phone, which is that self-hosted runner.
 
-On GitHub, the fast `F-Droid metadata` job runs on every pull request that touches `android/**`, `fdroiddata/**`, `test/**` or the workflow, and is the check to mark required in branch protection. The debug and reproducible release builds still run on pushes (including tags) and manual dispatch, never on pull requests. A version-bump PR normally names an `android-v*` tag that is created when the release is tagged, so the PR run prints a `warn` for a missing tag while the same state on `main` fails; run either mode locally with:
+On GitHub, the fast `F-Droid metadata` job runs on every pull request that touches `android/**`, `fdroiddata/**`, `test/**`, `tools/**` or the workflow, and is the check to mark required in branch protection. The debug and reproducible release builds still run on pushes (including tags) and manual dispatch, never on pull requests. A version-bump PR normally names an `android-v*` tag that is created when the release is tagged, so the PR run prints a `warn` for a missing tag while the same state on `main` fails; run either mode locally with:
 
 ```bash
 bash test/fdroid-metadata-test.sh                        # strict, as on main

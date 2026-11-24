@@ -18,15 +18,18 @@ there is no dependency to report and no `BuildConfig` field in the source.
 
 Everything else is already deterministic in this project:
 
-- **No dependencies**, so no resolution order or version drift can enter the APK.
+- **No dependencies in the APK**, so no resolution order or version drift can
+  enter it. (The androidTest APK has dependencies, pinned by
+  `android/app/gradle.lockfile`; it never enters the release APK.)
 - **One source set**, no flavours, no splits, no native code.
 - **Pinned toolchain**: Gradle wrapper 8.9, AGP 8.7.3, `compileSdk 35`,
-  `targetSdk 35`, `minSdk 24`, Java 17.
+  `targetSdk 35`, `minSdk 24`, Java 17. The AGP and SDK levels live in
+  `android/gradle/libs.versions.toml`.
 - **Fixed zip timestamps**: AGP writes `1981-01-01` entries, which is why the
   committed APK lists that date for every file.
-- **No build-time version stamping**: `versionCode`/`versionName` are literals in
-  `build.gradle.kts`, and there is no `git describe` or clock read anywhere in
-  the build.
+- **No build-time version stamping**: `versionCode`/`versionName` come from
+  `android/gradle/libs.versions.toml` at configuration time, and there is no
+  `git describe` or clock read anywhere in the build.
 
 ## How it is checked
 

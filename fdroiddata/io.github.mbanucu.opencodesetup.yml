@@ -63,8 +63,8 @@ MaintainerNotes: |-
   BuildConfig generation, which are the two inputs that vary without a source
   change. `docs/reproducible-builds.md` records how it is checked, and the
   `reproducible` CI job builds `assembleRelease` twice and compares the bytes.
-  `versionCode`/`versionName` live only in `android/app/build.gradle.kts` and must
-  match the `Builds` entry.
+  `versionCode`/`versionName` live only in `android/gradle/libs.versions.toml`
+  and must match the `Builds` entry.
 
 AutoUpdateMode: None
 UpdateCheckMode: None

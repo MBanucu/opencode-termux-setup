@@ -1,5 +1,6 @@
 package io.github.mbanucu.opencodesetup;
 
+import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -154,6 +155,9 @@ public final class TerminalActivity extends PageActivity {
         }
     }
 
+    // The flag exists only from API 33; the else branch must call the legacy
+    // overload on API 24-32, which is what lint misses through the guard.
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
