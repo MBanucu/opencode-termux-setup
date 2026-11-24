@@ -41,6 +41,18 @@ gh workflow run android --repo MBanucu/opencode-termux-setup
 gh run watch --repo MBanucu/opencode-termux-setup
 ```
 
+On Termux, the same build is one command; it finds the SDK, checks platform 35,
+build-tools 35.0.0 and the bionic aapt2, and never writes `local.properties`:
+
+```bash
+tools/termux-build.sh                       # checkBuildEnv + assembleDebug
+tools/termux-build.sh --offline lintDebug assembleDebugAndroidTest
+```
+
+[`../docs/termux-build.md`](../docs/termux-build.md) records the wrapper
+checksum, the androidTest lockfile and the toolchain decision (still AGP 8.7.3 /
+Gradle 8.9).
+
 The APK is uploaded as the `opencode-setup-debug-apk` artifact, and attached to
 the latest release.
 

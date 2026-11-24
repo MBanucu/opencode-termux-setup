@@ -18,7 +18,9 @@ on:
       - 'android/**'
       - 'fdroiddata/**'
       - 'docs/reproducible-builds.md'
+      - 'docs/termux-build.md'
       - 'test/**'
+      - 'tools/**'
       - 'LICENSE'
       - '.github/workflows/android.yml'
   pull_request:
@@ -26,7 +28,9 @@ on:
       - 'android/**'
       - 'fdroiddata/**'
       - 'docs/reproducible-builds.md'
+      - 'docs/termux-build.md'
       - 'test/**'
+      - 'tools/**'
       - 'LICENSE'
       - '.github/workflows/android.yml'
 
@@ -51,6 +55,15 @@ jobs:
           # shallow checkout of a commit made after that tag contains no tags at
           # all, so the test failed on documentation-only pushes.
           fetch-depth: 0
+
+      # The wrapper is a distribution download and a JAR.  Check both halves:
+      # the action checks the JAR against Gradle's published checksums, and the
+      # script checks distributionSha256Sum against the published .sha256.
+      - name: Validate the Gradle wrapper JAR
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Verify the Gradle distribution hash
+        run: bash tools/check-wrapper.sh --online
 
       - name: F-Droid metadata test
         env:
@@ -110,7 +123,8 @@ jobs:
           set -o pipefail
           log="$RUNNER_TEMP/assemble.log"
           for attempt in 1 2 3 4; do
-            if ./gradlew --no-daemon --stacktrace assembleDebug assembleDebugAndroidTest 2>&1 | tee "$log"; then
+            if ./gradlew --no-daemon --stacktrace --warning-mode all \
+                checkBuildEnv assembleDebug assembleDebugAndroidTest 2>&1 | tee "$log"; then
               exit 0
             fi
             echo "::warning::assemble attempt $attempt failed"
@@ -146,11 +160,11 @@ jobs:
           path: android/app/build/outputs/apk/androidTest/debug/*.apk
           if-no-files-found: error
 
-      # Advisory while the app is young.
-      - name: Lint (advisory)
-        continue-on-error: true
+      # Required: the two pre-existing errors were fixed in values-v27 and the
+      # receiver flag; warnings stay warnings (abortOnError is true).
+      - name: Lint
         working-directory: android
-        run: ./gradlew --no-daemon lintDebug
+        run: ./gradlew --no-daemon --warning-mode all lintDebug
 
   reproducible:
     name: reproducible release build
@@ -208,3 +222,29 @@ jobs:
             exit 1
           fi
           ls -l "$RUNNER_TEMP/first.apk"
+
+  # The Ubuntu jobs cannot exercise Termux's bionic aapt2 or the on-phone Gradle
+  # daemon.  This job runs the same documented one-command path on a self-hosted
+  # phone runner.  It is opt-in until a runner labelled `self-hosted, termux` is
+  # registered and the repository variable TERMUX_RUNNER_ENABLED is set to
+  # `true`; without a runner the job is skipped, so it does not claim a Termux
+  # build passed.  docs/termux-build.md records the remaining work.
+  termux:
+    name: Termux smoke build
+    needs: metadata
+    if: github.event_name != 'pull_request' && vars.TERMUX_RUNNER_ENABLED == 'true'
+    runs-on: [self-hosted, termux]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build through the documented script
+        run: bash tools/termux-build.sh lintDebug assembleDebug assembleDebugAndroidTest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: termux-smoke-apks
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/androidTest/debug/*.apk
+          if-no-files-found: error

@@ -21,6 +21,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 id_expected=$(basename "$root/fdroiddata/io.github.mbanucu.opencodesetup.yml" .yml)
 yml="$root/fdroiddata/$id_expected.yml"
 gradle="$root/android/app/build.gradle.kts"
+catalog="$root/android/gradle/libs.versions.toml"
 fastlane="$root/android/fastlane/metadata/android/en-US"
 failures=0
 warnings=0
@@ -59,6 +60,10 @@ skip() { printf '  skip  %s\n' "$1"; }
     echo "missing $gradle"
     exit 1
 }
+[ -f "$catalog" ] || {
+    echo "missing $catalog"
+    exit 1
+}
 
 echo "app id"
 namespace=$(sed -n 's/^ *namespace = "\(.*\)"/\1/p' "$gradle" | head -1)
@@ -70,9 +75,15 @@ application_id=$(sed -n 's/^ *applicationId = "\(.*\)"/\1/p' "$gradle" | head -1
     pass "namespace matches applicationId" ||
     fail "namespace '$namespace' != applicationId '$application_id'"
 
-echo "version parity (build.gradle.kts vs recipe)"
-name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' "$gradle" | head -1)
-code=$(sed -n 's/^ *versionCode = \(.*\)/\1/p' "$gradle" | head -1)
+echo "version parity (libs.versions.toml vs recipe)"
+name=$(sed -n 's/^appVersionName = "\(.*\)"/\1/p' "$catalog" | head -1)
+code=$(sed -n 's/^appVersionCode = "\(.*\)"/\1/p' "$catalog" | head -1)
+grep -q 'libs.versions.appVersionName' "$gradle" &&
+    pass "the app reads versionName from the catalog" ||
+    fail "app/build.gradle.kts does not use libs.versions.appVersionName"
+grep -q 'libs.versions.appVersionCode' "$gradle" &&
+    pass "the app reads versionCode from the catalog" ||
+    fail "app/build.gradle.kts does not use libs.versions.appVersionCode"
 # The first key of a Builds entry carries the YAML list dash: "- versionName:".
 build_name=$(sed -n '/^Builds:/,/^[A-Z]/s/^ *-* *versionName: \(.*\)/\1/p' "$yml" | head -1)
 build_code=$(sed -n '/^Builds:/,/^[A-Z]/s/^ *-* *versionCode: \(.*\)/\1/p' "$yml" | head -1)
@@ -80,10 +91,10 @@ current_name=$(sed -n 's/^CurrentVersion: \(.*\)/\1/p' "$yml" | head -1)
 current_code=$(sed -n 's/^CurrentVersionCode: \(.*\)/\1/p' "$yml" | head -1)
 [ -n "$name" ] && [ "$build_name" = "$name" ] &&
     pass "Builds.versionName == $name" ||
-    fail "Builds.versionName '$build_name' != build.gradle.kts '$name'"
+    fail "Builds.versionName '$build_name' != catalog '$name'"
 [ -n "$code" ] && [ "$build_code" = "$code" ] &&
     pass "Builds.versionCode == $code" ||
-    fail "Builds.versionCode '$build_code' != build.gradle.kts '$code'"
+    fail "Builds.versionCode '$build_code' != catalog '$code'"
 [ "$current_name" = "$name" ] &&
     pass "CurrentVersion == $name" ||
     fail "CurrentVersion '$current_name' != '$name'"
