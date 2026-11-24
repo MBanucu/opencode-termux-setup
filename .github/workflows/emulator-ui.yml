@@ -25,6 +25,7 @@ on:
     paths:
       - 'android/**'
       - 'test/**'
+      - '.github/scripts/**'
       - '.github/workflows/emulator-ui.yml'
 
 permissions:
@@ -108,62 +109,10 @@ jobs:
           emulator-options: >-
             -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
             -no-snapshot -camera-back none -camera-front none
-          script: |
-            # The action runs this block with /bin/sh, not bash. Keep it POSIX;
-            # `set -o pipefail` made the whole job fail before its first command.
-            set -eu
-
-            # The action only runs this script once the emulator has booted, but
-            # say which device was chosen and refuse to test anything else.
-            serial=$(adb get-serialno | tr -d '\r')
-            case "$serial" in
-              emulator-*) ;;
-              *) echo "::error::no emulator device: adb get-serialno returned '$serial'"; exit 1 ;;
-            esac
-            abi=$(adb shell getprop ro.product.cpu.abi | tr -d '\r')
-            [ "$abi" = x86_64 ] || {
-              echo "::error::expected an x86_64 AVD, got '$abi'"; exit 1;
-            }
-            echo "emulator $serial, abi $abi"
-
-            adb install -r -g "$RUNNER_TEMP/termux.apk"
-
-            # allow-external-apps has to exist before Termux first reads it.
-            # run-as is why the workflow fetches the debuggable build.
-            adb shell "run-as com.termux sh -c '
-              mkdir -p files/home/.termux
-              if ! grep -qx allow-external-apps=true files/home/.termux/termux.properties 2>/dev/null; then
-                echo allow-external-apps=true >> files/home/.termux/termux.properties
-              fi
-            '"
-
-            # First launch extracts the bundled bootstrap; wait for its bash.
-            adb shell am start -W -n com.termux/.app.TermuxActivity
-            for _ in $(seq 1 90); do
-              adb shell run-as com.termux test -x files/usr/bin/bash 2>/dev/null && break
-              sleep 2
-            done
-            adb shell run-as com.termux test -x files/usr/bin/bash || {
-              echo "::error::Termux bootstrap never produced files/usr/bin/bash"; exit 1;
-            }
-
-            # The app wraps commands in `script` and resizes with `stty`; the
-            # base bootstrap does not guarantee them. No opencode, and no
-            # package from the opencode repository.
-            adb shell "run-as com.termux env \
-              HOME=/data/data/com.termux/files/home \
-              PREFIX=/data/data/com.termux/files/usr \
-              PATH=/data/data/com.termux/files/usr/bin:/system/bin \
-              bash -lc 'pkg update -y && pkg install -y util-linux coreutils'"
-
-            if adb shell run-as com.termux test -e files/usr/bin/opencode; then
-              echo "::error::opencode is installed; the ui-only job must not depend on it"
-              exit 1
-            fi
-
-            # The script uses the emulator adb already lists and refuses to run
-            # the install group. Exact test counts are checked by the script.
-            bash test/android-e2e.sh --ui-only --no-record
+          # The action splits `script` on newlines and runs each line in its own
+          # `/bin/sh -c`. A real script file keeps the shell state and lets this
+          # run under bash instead of dash.
+          script: bash .github/scripts/emulator-ui.sh
 
       # Runs even after a failed suite so a red job still uploads the evidence,
       # and fails itself when a phase is absent or the install group slipped in.
