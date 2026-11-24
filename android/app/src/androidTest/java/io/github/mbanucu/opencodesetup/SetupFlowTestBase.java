@@ -7,7 +7,6 @@ import static org.junit.Assert.fail;
 
 import android.content.Intent;
 
-import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.By;
 import androidx.test.uiautomator.UiDevice;
@@ -16,11 +15,7 @@ import androidx.test.uiautomator.Until;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.FixMethodOrder;
 import org.junit.Rule;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.MethodSorters;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -34,8 +29,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Drives the real app on a device through accessibility, not through
- * screenshots and not through sleeps.
+ * Shared machinery for the setup-flow tests, split by dependency.
+ *
+ * <p>{@link SetupFlowUiTest} covers the pages that need neither opencode nor the
+ * installer, and runs on a hosted x86_64 emulator. {@link SetupFlowInstallTest}
+ * removes and reinstalls the real aarch64 package and therefore runs only on a
+ * real arm64 device. Keeping the helpers here means both groups drive the app
+ * exactly the same way; the split is about what the device must have, not about
+ * how the test works.
  *
  * <p>UI Automator subscribes to the accessibility event stream, so every wait
  * here resolves the moment the UI changes: {@code Until.hasObject} and
@@ -49,29 +50,26 @@ import java.util.regex.Pattern;
  * on the page that sent it. Whether the command actually
  * changed the system is then answered by "Check setup", which runs
  * {@code opencode --version} in Termux and reports the result back through a
- * {@code PendingIntent}. The suite therefore removes opencode from the device
- * and installs it again, asserting on the version each time.
+ * {@code PendingIntent}.
  *
  * <p>Prerequisites on the device: Termux installed, {@code allow-external-apps=true}
- * in {@code ~/.termux/termux.properties}, network access, and this package
- * installed. Run with {@code test/android-e2e.sh}.
+ * in {@code ~/.termux/termux.properties}, and this package installed. The
+ * install group also needs network access and an aarch64 Termux.
  */
-@RunWith(AndroidJUnit4.class)
-@FixMethodOrder(MethodSorters.NAME_ASCENDING)
-public final class SetupFlowTest {
+public abstract class SetupFlowTestBase {
 
-    private static final String PACKAGE = "io.github.mbanucu.opencodesetup";
-    private static final String TERMUX = "com.termux";
-    private static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
+    static final String PACKAGE = "io.github.mbanucu.opencodesetup";
+    static final String TERMUX = "com.termux";
+    static final String PERMISSION = "com.termux.permission.RUN_COMMAND";
     /** A screen change: a page opens, a button appears. */
-    private static final long SHORT = 5_000;
-    private static final long LONG = 120_000;
+    static final long SHORT = 5_000;
+    static final long LONG = 120_000;
     /** One Termux round trip; a check answers in about a second. */
-    private static final long POLL = 12_000;
+    static final long POLL = 12_000;
     /** The first chunk of a command that is still running. */
-    private static final long STREAM = 8_000;
+    static final long STREAM = 8_000;
     /** Between two checks while waiting for a long command to finish. */
-    private static final long RETRY = 1_000;
+    static final long RETRY = 1_000;
     /**
      * How long a running command may produce nothing at all.
      *
@@ -79,7 +77,7 @@ public final class SetupFlowTest {
      * honest duration to assert on: the test watches the download and fails on
      * silence, not on slowness.
      */
-    private static final long STALL = 60_000;
+    static final long STALL = 60_000;
 
     /**
      * What "Check setup" prints, and nothing else. Matching the whole result is
@@ -88,12 +86,12 @@ public final class SetupFlowTest {
      * line of its own, so a loose {@code contains("opencode v")} could pass on
      * the installer's log instead of on a check run afterwards.
      */
-    private static final Pattern CHECK_REMOVED =
+    static final Pattern CHECK_REMOVED =
             Pattern.compile("(?s)^opencode is not installed\\n+\\nexit code 0$");
-    private static final Pattern CHECK_INSTALLED =
+    static final Pattern CHECK_INSTALLED =
             Pattern.compile("(?s)^opencode v\\S+\\n+\\nexit code 0$");
 
-    private UiDevice device;
+    UiDevice device;
 
     /** Logs this test's duration; the harness keeps those in its database. */
     @Rule
@@ -117,171 +115,13 @@ public final class SetupFlowTest {
         }
     }
 
-    @Test
-    public void aMainScreenOffersTheFourActions() throws Exception {
-        assertNotNull("install", device.findObject(By.text("Install opencode")));
-        assertNotNull("uninstall", device.findObject(By.text("Uninstall opencode")));
-        assertNotNull("check", device.findObject(By.text("Check setup")));
-        assertNotNull("open Termux", device.findObject(By.text("Open Termux")));
-        milestone("main");
-    }
-
-    @Test
-    public void bInstallConsentDialogStatesTheDownload() throws Exception {
-        device.findObject(By.text("Install opencode")).click();
-        assertTrue("the consent dialog appears",
-                device.wait(Until.hasObject(By.text("Download about 70 MB?")), SHORT));
-
-        // The dialog is read through accessibility: the text node is what a
-        // screen reader would announce, and it is what the test asserts on.
-        UiObject2 message = device.wait(
-                Until.findObject(By.textContains("bd-loser/opencode-bionic")), SHORT);
-        assertNotNull("the dialog names the repository it will add", message);
-        String text = message.getText();
-        assertTrue("the download and installed sizes are stated",
-                text.contains("70 MB") && text.contains("209 MB"));
-        assertTrue("the command it will run is shown", text.contains("install.sh"));
-        assertTrue("the third-party build is named so consent is informed",
-                text.contains("third-party"));
-        milestone("consent");
-
-        // Platform dialog buttons are rendered uppercase, so match the label
-        // the accessibility tree reports rather than the string resource.
-        UiObject2 cancel = device.wait(
-                Until.findObject(By.text(Pattern.compile("(?i)^cancel$"))), SHORT);
-        assertNotNull("the dialog offers a cancel button", cancel);
-        cancel.click();
-        assertTrue("cancel closes the dialog and runs nothing",
-                device.wait(Until.gone(By.text("Download about 70 MB?")), SHORT));
-        assertTrue("no Termux window was opened by cancelling",
-                !device.hasObject(By.pkg(TERMUX)));
-    }
-
-    /**
-     * The uninstall page offers both outcomes and shows the command for each.
-     *
-     * <p>Nothing runs here: this is the page doing its job, including the fact
-     * that the safe choice is the one already selected.
-     */
-    @Test
-    public void cUninstallPageChoosesBetweenKeepingAndDeleting() throws Exception {
-        device.findObject(By.text("Uninstall opencode")).click();
-        assertTrue("the uninstall page opens",
-                device.wait(Until.hasObject(By.text("Remove opencode?")), SHORT));
-
-        UiObject2 keep = device.findObject(By.text("Keep my settings"));
-        UiObject2 purge = device.findObject(By.text("Remove everything"));
-        assertNotNull("keeping settings is offered", keep);
-        assertNotNull("deleting everything is offered", purge);
-        assertTrue("keeping settings is the default", keep.isChecked());
-        assertFalse("deleting everything is not the default", purge.isChecked());
-
-        UiObject2 preview = device.wait(Until.findObject(By.textContains("uninstall.sh")), SHORT);
-        assertNotNull("the page shows the command it would run", preview);
-        assertFalse("the default command keeps the data",
-                preview.getText().contains("--purge"));
-        UiObject2 keepDetail = device.findObject(By.textContains("~/.config/opencode"));
-        assertNotNull("the page names the directories the default keeps", keepDetail);
-        milestone("uninstall-page");
-
-        purge.click();
-        assertTrue("deleting everything changes the command",
-                device.wait(Until.hasObject(By.textContains("--purge")), SHORT));
-        // Re-read the nodes: a cached UiObject2 would answer for the old state.
-        assertTrue("the destructive choice is selected",
-                device.findObject(By.text("Remove everything")).isChecked());
-        assertFalse("the safe choice is deselected, not left on as well",
-                device.findObject(By.text("Keep my settings")).isChecked());
-        UiObject2 purgeDetail = device.findObject(By.textContains("connected again"));
-        assertNotNull("the destructive choice says what it destroys", purgeDetail);
-        milestone("purge-option");
-
-        keep.click();
-        assertTrue("going back to the safe choice removes --purge",
-                device.wait(Until.gone(By.textContains("--purge")), SHORT));
-
-        device.pressBack();
-        assertTrue("back returns to the main screen",
-                device.wait(Until.hasObject(By.text("Install opencode")), SHORT));
-        assertTrue("reading the page sends nothing", !device.hasObject(By.pkg(TERMUX)));
-    }
-
-    /**
-     * Removes opencode for real and proves it is gone by asking Termux.
-     *
-     * <p>The page's default is used, so this is also the promise that a normal
-     * uninstall keeps credentials: the command carries no {@code --purge}.
-     */
-    @Test
-    public void dUninstallRemovesOpenCodeForReal() throws Exception {
-        // Removing something that is not installed is a one-second repository
-        // cleanup, not a removal, and its streamed output would be over before
-        // the page could show it. A previous run can leave it gone, so the state
-        // is restored first.
-        String present;
-        try (TestMilestones.Step ignored = TestMilestones.step("ask whether it is there")) {
-            present = checkOnce();
-        }
-        if (present == null || !CHECK_INSTALLED.matcher(present.trim()).matches()) {
-            installThroughThePage();
-        }
-        try (TestMilestones.Step ignored = TestMilestones.step("open the uninstall page")) {
-            device.findObject(By.text("Uninstall opencode")).click();
-            assertTrue("the uninstall page opens",
-                    device.wait(Until.hasObject(By.text("Remove opencode?")), SHORT));
-        }
-
-        UiObject2 remove = device.wait(Until.findObject(By.text("Remove opencode")), SHORT);
-        assertNotNull("the page offers the action", remove);
-        long mark = eventsMark();
-        remove.click();
-
-        // Nothing may be raised over this app: the command runs in Termux's
-        // background runner and its output comes back to this page.
-        assertTrue("the app stays in front",
-                device.wait(Until.hasObject(By.pkg(PACKAGE)), SHORT));
-        assertFalse("the Termux window was not brought forward",
-                device.hasObject(By.pkg(TERMUX)));
-        milestone("uninstall-started");
-        // A still screen from here to the end of the block is the filesystem
-        // working, not the app hesitating: the harness reports it as work.
-        try (TestMilestones.Busy busy = TestMilestones.busy("uninstall");
-             TestMilestones.Step ignored = TestMilestones.step("uninstall command")) {
-            assertStreamed(mark,
-                    "the page shows Termux's output while the removal is still running");
-            // Ask only once the removal is over: a check sent while it runs answers
-            // with the old state, and the two results race in last-result.txt.
-            waitForResult(mark, STALL);
-        }
-
-        String report;
-        try (TestMilestones.Step ignored = TestMilestones.step("check that it is gone")) {
-            report = checkUntil(CHECK_REMOVED, 60_000);
-        }
-        assertTrue("the check that reported the removal ran in the app: " + report,
-                device.hasObject(By.pkg(PACKAGE)));
-        milestone("uninstalled");
-    }
-
-    /**
-     * Installs opencode for real, after the previous test removed it.
-     *
-     * <p>This is the whole point of the app: one tap, a genuine install in
-     * Termux, and a version string coming back through RUN_COMMAND. It fails if
-     * the install did not finish or did not produce a working binary.
-     */
-    @Test
-    public void eInstallPutsItBackForReal() throws Exception {
-        installThroughThePage();
-    }
-
     /**
      * Installs from the main page through the consent page, checking that the
      * app is not pushed aside, that output streams while it runs, and that the
      * version comes back from Termux afterwards. Used by the install test and by
      * the uninstall test when it has to restore the state it removes.
      */
-    private void installThroughThePage() throws Exception {
+    void installThroughThePage() throws Exception {
         bringToFront();
         UiObject2 install = device.findObject(By.text("Install opencode"));
         if (install == null) {
@@ -320,31 +160,6 @@ public final class SetupFlowTest {
         milestone("installed");
     }
 
-    /**
-     * The adb entry point runs the same commands as the UI.
-     *
-     * <p>{@code AdbCommandActivity} is exported for exactly this, and it answers
-     * through {@code last-result.txt} in the app's external files directory,
-     * which adb can read without root. Here the test reads the same file the
-     * shell would, after starting the activity the way a script would.
-     */
-    @Test
-    public void fAdbEndpointRunsTheSameCommands() throws Exception {
-        File result = resultFile();
-        assertTrue("old answer cleared", !result.exists() || result.delete());
-
-        device.executeShellCommand("am start -W -n " + PACKAGE + "/.AdbCommandActivity"
-                + " -e command check");
-        String report = awaitFile(result,
-                text -> CHECK_INSTALLED.matcher(text.trim()).matches(), 15_000);
-        assertNotNull("adb check returns Termux's real answer, not an acknowledgement", report);
-
-        device.executeShellCommand("am start -W -n " + PACKAGE + "/.AdbCommandActivity"
-                + " -e command bogus");
-        String error = awaitFile(result, text -> text.contains("unknown command"), 8_000);
-        assertNotNull("an unknown command is refused with a reason", error);
-    }
-
     // --- helpers -------------------------------------------------------------
 
     /**
@@ -358,7 +173,7 @@ public final class SetupFlowTest {
      * in the stack the system delivers the intent to it instead of bringing the
      * task forward, so the page never changes.
      */
-    private void bringToFront() throws Exception {
+    void bringToFront() throws Exception {
         // Already there: the actions are what the next step needs, so a lookup
         // that finds them is cheaper than reopening the page and waiting for it
         // to be laid out. A lookup that finds nothing also says the app is not
@@ -409,7 +224,7 @@ public final class SetupFlowTest {
     }
 
     /** Fails at the moment output should have started, quoting what happened. */
-    private void assertStreamed(long mark, String message) throws Exception {
+    void assertStreamed(long mark, String message) throws Exception {
         if (streamingText(mark) == null) {
             fail(message + " - no live chunk in " + (STREAM / 1000) + "s. " + diagnosis());
         }
@@ -473,7 +288,7 @@ public final class SetupFlowTest {
      * wait spent its whole timeout looking for an event that cannot happen, and
      * the caller asked again - for ever.
      */
-    private String checkOnce() throws Exception {
+    String checkOnce() throws Exception {
         bringToFront();
         File answer = resultFile();
         if (!answer.delete() && answer.exists()) {
@@ -522,7 +337,7 @@ public final class SetupFlowTest {
     }
 
     /** The log's length now: everything after it belongs to what happens next. */
-    private long eventsMark() {
+    long eventsMark() {
         return eventsFile().length();
     }
 
@@ -552,7 +367,7 @@ public final class SetupFlowTest {
     }
 
     /** Where the result bundle of the last command is stored. */
-    private File resultFile() {
+    File resultFile() {
         return new File(InstrumentationRegistry.getInstrumentation()
                 .getTargetContext().getExternalFilesDir(null), "last-result.txt");
     }
@@ -569,7 +384,7 @@ public final class SetupFlowTest {
      * with the old version while the install is still downloading - so the only
      * honest signal is a check that has already started after the work finished.
      */
-    private String checkUntil(Pattern wanted, long budget) throws Exception {
+    String checkUntil(Pattern wanted, long budget) throws Exception {
         long deadline = System.currentTimeMillis() + budget;
         String report = null;
         while (System.currentTimeMillis() < deadline) {
@@ -599,7 +414,7 @@ public final class SetupFlowTest {
      * still running answers with the state before it, and the installer's summary
      * and the check's answer overwrite each other in {@code last-result.txt}.
      */
-    private void waitForResult(long mark, long stall) throws Exception {
+    void waitForResult(long mark, long stall) throws Exception {
         long silence = System.currentTimeMillis() + stall;
         long bytes = 0;
         while (true) {
@@ -661,7 +476,7 @@ public final class SetupFlowTest {
      * suite polls, because the answer is a file rather than a UI node: the adb
      * path has no accessibility tree to subscribe to.
      */
-    private String awaitFile(File file, Predicate<String> acceptable, long budget)
+    String awaitFile(File file, Predicate<String> acceptable, long budget)
             throws Exception {
         boolean found = FileWatcher.await(file, () -> {
             String text = read(file);
@@ -691,7 +506,7 @@ public final class SetupFlowTest {
      * A moment worth finding later. It used to take a PNG; the suite records the
      * screen now, and this only names the second to look at in that recording.
      */
-    private void milestone(String name) {
+    void milestone(String name) {
         TestMilestones.mark(name);
     }
 }

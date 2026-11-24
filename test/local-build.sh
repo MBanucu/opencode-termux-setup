@@ -10,6 +10,7 @@
 #   bash test/local-build.sh --skip-tests    # build only, print the APK paths
 #   bash test/local-build.sh --skip-samples  # the app and its suite, not the samples
 #   bash test/local-build.sh --samples       # only the sample app
+#   bash test/local-build.sh --ui-only       # ui + pty groups, no installer
 #   bash test/local-build.sh --only <class>[#method]   # one test instead of the suite
 #
 # Needs: JDK 17+, an Android SDK (ANDROID_HOME, ANDROID_SDK_ROOT, ~/android-sdk
@@ -36,6 +37,7 @@ run_tests=true
 run_samples=true
 samples_only=false
 only=""
+ui_only=false
 
 while [ $# -gt 0 ]; do
     case $1 in
@@ -47,6 +49,7 @@ while [ $# -gt 0 ]; do
             build=false
             run_tests=false
             shift ;;
+        --ui-only)      ui_only=true; shift ;;
         --only)
             [ -n "${2:-}" ] || { echo "--only needs a class or class#method" >&2; exit 2; }
             only=$2
@@ -54,6 +57,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "usage: bash test/local-build.sh [--offline] [--skip-tests] [--skip-samples]"
             echo "       bash test/local-build.sh --samples"
+            echo "       bash test/local-build.sh --ui-only"
             echo "       bash test/local-build.sh --only <class>[#method]"
             exit 0 ;;
         *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
@@ -134,7 +138,10 @@ if $run_tests; then
         echo "(one test: $only)"
     fi
     suite_start=$SECONDS
-    if ! bash "$root/test/android-e2e.sh" ${only:+--only "$only"} "$apk" "$test_apk"; then
+    flags=()
+    if $ui_only; then flags+=(--ui-only); fi
+    if ! bash "$root/test/android-e2e.sh" ${flags[@]+"${flags[@]}"} \
+        ${only:+--only "$only"} "$apk" "$test_apk"; then
         echo "suite FAILED after $((SECONDS - suite_start))s" >&2
         exit 1
     fi

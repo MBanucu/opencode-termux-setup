@@ -69,41 +69,56 @@ accessibility event stream: waits are `Until.hasObject` / `Until.findObject` /
 sleep, and the nodes a screen reader would see are what the tests match on. No
 assertion comes from a screenshot.
 
-- `SetupFlowTest` — the main screen offers four actions; the install and
-  uninstall pages name their command and what it changes (sizes and repository
-  for install), and cancel leaves them without a side effect; **the uninstall
-  page** offers keeping
-  settings or deleting them, has keeping preselected, swaps the command to
-  `--purge` when deleting is chosen, and sends nothing while being read;
-  **Remove really removes**: it presses the page's action, waits for Termux's
-  window, then asks "Check setup" until Termux reports `opencode is not
-  installed`; **Start setup really installs**: after that removal it downloads
-  and installs opencode again and passes only once Termux reports a version with
-  `exit code 0`. So the suite runs with no opencode on the device and leaves one
-  behind. **adb parity**: `AdbCommandActivity` is started the way a script would
-  start it and its `last-result.txt` must carry Termux's real answer, and an
-  unknown command must be refused with a reason.
+The classes are split by dependency in `test/e2e-groups.sh`:
+
+- **`ui`** — `SetupFlowUiTest` and `PermissionDeniedTest`. The main screen offers
+  four actions; the install and uninstall pages name their command and what they
+  change (sizes and repository for install), and cancel leaves them without a
+  side effect; the uninstall page offers keeping settings or deleting them, has
+  keeping preselected, swaps the command to `--purge` when deleting is chosen,
+  and sends nothing while being read. `PermissionDeniedTest` runs on its own
+  because revoking a dangerous permission kills the process the runner lives in:
+  Android asks for `com.termux.permission.RUN_COMMAND`, and a denial produces the
+  explanation with a link to the app settings. None of this downloads opencode,
+  so it runs on the hosted x86_64 emulator.
+- **`pty`** — `TerminalHeightTest`, `PtySizeTest`, `PtyRenderingTest` and
+  `PtyResizeTest`: terminal geometry, the PTY width/height a command actually
+  sees, raw escape rendering and live resizing. They run commands in Termux but
+  install nothing, so they also run in `--ui-only`.
+- **`install`** — `SetupFlowInstallTest`. **Remove really removes**: it presses
+  the page's action, waits for Termux's output, then asks "Check setup" until
+  Termux reports `opencode is not installed`; **Start setup really installs**:
+  after that removal it downloads and installs opencode again and passes only
+  once Termux reports a version with `exit code 0`; **adb parity** starts
+  `AdbCommandActivity` the way a script would and requires Termux's real answer
+  in `last-result.txt`, plus a refusal for an unknown command. This group needs
+  aarch64/Bionic Termux and the real package, and is refused by `--ui-only`.
 
 Both real operations are asynchronous in Termux, so their budget is measured in
 what they actually do: up to 5 minutes for a removal (apt lock and package swap)
 and up to 15 minutes for a reinstall (a 70 MB download over mobile data). A check
 that answers while the work is still running is ignored rather than trusted -
 the test asks again, and only a check started after the work finished counts.
-- `PermissionDeniedTest` — a second run on purpose, because revoking a dangerous
-  permission kills the process the runner lives in: Android asks for
-  `com.termux.permission.RUN_COMMAND`, and a denial produces the explanation with
-  a link to the app settings.
 
 ```bash
 cd android && ./gradlew assembleDebug assembleDebugAndroidTest
-bash ../test/android-e2e.sh      # adb install + am instrument, both runs
+bash ../test/android-e2e.sh              # full suite: needs aarch64 Termux
+bash ../test/android-e2e.sh --ui-only    # ui + pty only, no opencode install
+bash ../test/android-e2e.sh --ui-only --list   # selection without a device
 ```
 
-Expect several minutes: the suite uninstalls and reinstalls the real package.
+Expect several minutes for the full suite: it uninstalls and reinstalls the real
+package. `--ui-only` is the only mode a hosted x86_64 emulator can run; it fails
+rather than silently skipping if an install-dependent test is selected, and it
+never calls the installer. CI compiles both APKs on every push
+(`assembleDebugAndroidTest`) and uploads the test APK, so a test that stops
+compiling cannot land.
 
-CI compiles both APKs on every push (`assembleDebugAndroidTest`) and uploads the
-test APK, so a test that stops compiling cannot land. Running them needs a device
-or emulator.
+The split is the two-tier gate: hosted `ui-only` (`.github/workflows/emulator-ui.yml`)
+covers UI and pty, and the self-hosted `android-arm64` job (`.github/workflows/e2e-arm64.yml`)
+runs the full suite after merge once that runner exists. A missing arm64 runner
+leaves the full job queued, not green. `bash test/e2e-groups-test.sh` verifies the
+classification and the `--ui-only` refusal without a device.
 
 Install the app and the test APK **from the same artifact set**. CI mints a fresh
 debug keystore on every run, so a test APK from one run does not match an app APK

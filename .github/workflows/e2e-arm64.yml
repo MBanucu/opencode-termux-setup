@@ -1,0 +1,91 @@
+name: e2e-arm64
+
+# The full post-merge e2e gate, on the only hardware that can run it: a real
+# aarch64 Android device with Termux. It is opt-in until an `android-arm64`
+# self-hosted runner is online. Dispatching this workflow with no such runner
+# leaves the job queued - blocked, never green - which is the intended signal.
+#
+# Do not add `continue-on-error`, a `runs-on: ubuntu-*` fallback, or an `if:`
+# that skips the job when the runner is absent. Any of those would turn a
+# missing device into a passing release gate.
+#
+# Once a runner exists, add the push trigger below, mark the check required in
+# branch protection, and make it part of the release checklist:
+#
+#   push:
+#     branches: [main]
+#
+# The runner is a phone or board that is itself the device under test. It needs:
+#   * `uname -m` = aarch64, Termux with allow-external-apps=true;
+#   * adb plus adb-harness from test/requirements.txt in test/.venv (or on PATH);
+#   * JDK 17 and an Android SDK, so `test/local-build.sh` can build both APKs;
+#   * the `android-arm64` label on the runner.
+#
+# The full suite removes and reinstalls the real aarch64 opencode package. That
+# is the step a hosted x86_64 AVD cannot do: opencode-bionic is a Bionic
+# aarch64 ELF and install.sh refuses any other uname -m.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a running install halfway through: it would leave the device in
+# an unknown state for the next run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  arm64:
+    name: full e2e (arm64)
+    # The label is the gate. If no runner advertises it, this job stays queued.
+    runs-on: [self-hosted, android-arm64]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      # A wrong-architecture runner is not a reason to report success.
+      - name: Preflight (aarch64 Android device)
+        run: |
+          set -euo pipefail
+          echo "host: $(uname -a)"
+          arch=$(uname -m)
+          [ "$arch" = aarch64 ] || {
+            echo "::error::android-arm64 runner reports '$arch', not aarch64"; exit 1;
+          }
+          command -v adb >/dev/null || { echo "::error::adb is missing"; exit 1; }
+          adb devices -l
+          if adb devices | awk 'NR > 1 && $2 == "device" { found = 1 } END { exit !found }'; then
+            echo "using the device adb already lists: $(adb get-serialno)"
+          else
+            harness="$PWD/test/.venv/bin/adb-connect"
+            [ -x "$harness" ] || harness=$(command -v adb-connect || true)
+            [ -n "$harness" ] || {
+              echo "::error::no connected device and no adb-connect"; exit 1;
+            }
+            "$harness" --timeout 8
+          fi
+
+      # Build both APKs from this commit. Sharing a build with the hosted job is
+      # not possible: CI signs each run with a different debug keystore, and a
+      # mismatched app/test APK pair fails at instrumentation.
+      - name: Build the app and test APKs
+        run: bash test/local-build.sh --skip-tests --skip-samples
+
+      # Full mode: ui, pty and the real install group. The script fails unless
+      # each phase reports its exact test count, so a skipped install group
+      # cannot look like a pass.
+      - name: Full e2e suite
+        env:
+          E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
+        run: bash test/android-e2e.sh --no-record
+
+      - name: Upload instrumentation output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-e2e-instrumentation
+          path: ${{ runner.temp }}/e2e-logs
+          if-no-files-found: error

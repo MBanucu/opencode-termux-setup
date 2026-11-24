@@ -7,8 +7,9 @@ of them look like harmless simplifications from the outside.
 
 Commands referenced here are the ones in the README: `bash test/local-build.sh`
 builds and runs everything, `--only <class>[#method]` runs one test class,
-`--samples` builds the xterm-a11y sample only, and
-`test/android-e2e.sh --no-record --only <class>` skips the recording. The e2e
+`--samples` builds the xterm-a11y sample only,
+`test/android-e2e.sh --no-record --only <class>` skips the recording, and
+`test/android-e2e.sh --ui-only` runs only the ui/pty groups. The e2e
 scripts expect the tools in `test/requirements.txt` (currently `adb-harness[mdns]`)
 in `test/.venv` or on `PATH`:
 
@@ -19,6 +20,16 @@ test/.venv/bin/pip install -r test/requirements.txt
 
 Do not copy `adb-connect` or `adb-watch` back into `test/`: that is what this
 repository removed in favour of the package.
+
+## Every test belongs to a group in `test/e2e-groups.sh`
+
+The instrumented suite is split by dependency, not by class size: `ui` and `pty`
+can run on a hosted x86_64 emulator, `install` cannot because opencode-bionic is
+aarch64/Bionic and needs a real Termux userspace. A new `@Test` class that is not
+in the manifest is a failure of `bash test/e2e-groups-test.sh`, not something
+that quietly runs nowhere. Do not put an install-dependent class in `ui`; the
+`--ui-only` guard refuses the whole group, so a misplaced class makes the hosted
+job red rather than hiding the real setup flow.
 
 ## Test the page a user opens, not a shortcut into it
 
@@ -62,7 +73,7 @@ The reverse is also true, and this is what a check has to account for: a page
 that is not in front does not write `live-output.txt`, but it still publishes its
 finished screen to the node. So neither source is authoritative alone. Read the
 node, wait on the file when the node says nothing, then read the node once more
-for the page that was still repainting — that is `SetupFlowTest.pageShows`.
+for the page that was still repainting — that is `SetupFlowTestBase.pageShows`.
 
 ## Publish all of the screen, not the last 40 lines
 
@@ -158,11 +169,11 @@ Three things that cost runs here:
 
 ## A failing suite is usually leftover device state
 
-`SetupFlowTest` failed in `@Before` on `aMainScreenOffersTheFourActions`:
+`SetupFlowUiTest` failed in `@Before` on `aMainScreenOffersTheFourActions`:
 `the MainActivity page never said it was laid out`, with the screen still showing
 the opencode TUI. Nothing in the diff under review caused it — the previous TUI
 run left the app on that page. `adb shell am force-stop io.github.mbanucu.opencodesetup`
-and a back press later, the class returned `OK (6 tests)`.
+and a back press later, the class returned `OK (3 tests)`.
 
 Reset the app before believing a first-run failure, and treat this as a known
 fragility: `bringToFront` gives the main page only a few seconds to announce
@@ -183,8 +194,10 @@ separates a slow test from a slow screen, which is what the busy spans in
 
 ## Keep a commit to the change it describes
 
-`SetupFlowTest.java` was already modified when `terminal.html` was fixed, so it
-was left out of that commit (`d559217`) and committed on its own once reviewed.
+The setup-flow tests were already modified when `terminal.html` was fixed, so
+they were left out of that commit (`d559217`) and committed on their own once
+reviewed. The class is now `SetupFlowTestBase` plus `SetupFlowUiTest` and
+`SetupFlowInstallTest`.
 Check `git status` before committing: a working tree that is dirty with someone
 else's change is the normal state of this repo, not permission to bundle.
 
