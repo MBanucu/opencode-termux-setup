@@ -109,7 +109,9 @@ jobs:
             -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
             -no-snapshot -camera-back none -camera-front none
           script: |
-            set -euo pipefail
+            # The action runs this block with /bin/sh, not bash. Keep it POSIX;
+            # `set -o pipefail` made the whole job fail before its first command.
+            set -eu
 
             # The action only runs this script once the emulator has booted, but
             # say which device was chosen and refuse to test anything else.
