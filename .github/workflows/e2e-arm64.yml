@@ -68,6 +68,69 @@ jobs:
             "$harness" --timeout 8
           fi
 
+      # A UI suite cannot run behind a keyguard: the app is running, but
+      # bringToFront()/actionsVisible() see it as not in the foreground and every
+      # UI test fails. Wake the device, get past the keyguard, and keep the
+      # screen awake for the rest of the job, so a run never depends on someone
+      # having unlocked the phone by hand.
+      - name: Wake and unlock the device
+        env:
+          DEVICE_PIN: ${{ secrets.DEVICE_PIN }}
+        run: |
+          set -euo pipefail
+
+          # The only trustworthy signal: `dumpsys user | grep State:` reports
+          # RUNNING_UNLOCKED while the keyguard is still up, and mCurrentFocus
+          # stays NotificationShade on the keyguard even after a real unlock.
+          keyguard() {
+            adb shell dumpsys window | tr -d '\r' \
+              | sed -n 's/.*mDreamingLockscreen=\([a-z]*\).*/\1/p' | head -1
+          }
+
+          # A re-lock re-arms the keyguard and fails the UI phase minutes in, so
+          # hold the screen awake for the whole job. Detached with setsid: the
+          # runner tears down the step's process group when the step ends.
+          setsid nohup bash -c 'while :; do adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1; sleep 15; done' \
+            >/dev/null 2>&1 &
+          echo $! > "$RUNNER_TEMP/keepawake.pid"
+
+          adb shell input keyevent KEYCODE_WAKEUP
+          adb shell cmd statusbar collapse >/dev/null 2>&1 || true
+          # MENU raises the PIN bouncer. Without it `input text` has no focused
+          # field and the digits are silently discarded.
+          adb shell input keyevent 82
+          sleep 1
+
+          if [ "$(keyguard)" != false ]; then
+            # Swipe at the device's own resolution; a 1080-wide guess misses the
+            # keyguard on wide panels.
+            size=$(adb shell wm size | tr -d '\r' | sed -n 's/.*Physical size: \([0-9]*\)x\([0-9]*\).*/\1 \2/p')
+            read -r width height <<<"${size:-1080 1920}"
+            adb shell input swipe "$((width / 2))" "$((height * 8 / 10))" \
+              "$((width / 2))" "$((height * 28 / 100))" 200
+            sleep 2
+          fi
+
+          # Only type if the swipe did not already dismiss a swipe keyguard,
+          # otherwise the digits would land in whatever app is in front.
+          if [ "$(keyguard)" != false ]; then
+            [ -n "${DEVICE_PIN:-}" ] || {
+              echo "::error::the keyguard is up and no DEVICE_PIN secret is set"; exit 1;
+            }
+            adb shell input text "$DEVICE_PIN"
+            adb shell input keyevent 66
+            for _ in $(seq 1 10); do
+              [ "$(keyguard)" = false ] && break
+              sleep 1
+            done
+          fi
+
+          [ "$(keyguard)" = false ] || {
+            echo "::error::device is still locked (mDreamingLockscreen=$(keyguard)); a wrong DEVICE_PIN fails here";
+            exit 1;
+          }
+          echo "device is awake and unlocked"
+
       # Build both APKs from this commit. Sharing a build with the hosted job is
       # not possible: CI signs each run with a different debug keystore, and a
       # mismatched app/test APK pair fails at instrumentation.
@@ -81,6 +144,14 @@ jobs:
         env:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
         run: bash test/android-e2e.sh --no-record
+
+      - name: Stop the keep-awake loop
+        if: always()
+        run: |
+          if [ -s "$RUNNER_TEMP/keepawake.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/keepawake.pid")" 2>/dev/null || true
+            rm -f "$RUNNER_TEMP/keepawake.pid"
+          fi
 
       - name: Upload instrumentation output
         if: always()
